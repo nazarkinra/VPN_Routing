@@ -1,0 +1,20 @@
+# Текст хранится в репозитории с LF; в рабочей копии — по правилам ниже
+* text=auto
+
+# Скрипты Windows — CRLF, Unix — LF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+gradlew text eol=lf
+
+# Крупные двоичные файлы — в Git LFS: библиотека ядра (~60 МБ) и готовый APK
+*.aar filter=lfs diff=lfs merge=lfs -text
+*.apk filter=lfs diff=lfs merge=lfs -text
+
+# Прочие двоичные файлы
+*.jar binary
+*.so binary
+*.png binary
+*.jpg binary
+*.webp binary

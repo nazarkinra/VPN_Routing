@@ -1,0 +1,71 @@
+<resources>
+    <string name="app_name">VPN routing</string>
+    <string name="notification_channel">Состояние VPN</string>
+
+    <!-- Вкладки -->
+    <string name="tab_vpn">VPN</string>
+    <string name="tab_corp">МГТУ</string>
+    <string name="tab_direct">Напрямую</string>
+
+    <!-- VPN -->
+    <string name="status_stopped">Не подключено</string>
+    <string name="status_connecting">Подключение…</string>
+    <string name="status_connected">Подключено</string>
+    <string name="status_error">Ошибка подключения</string>
+    <string name="tap_to_connect">Нажмите, чтобы подключиться</string>
+    <string name="current_server">Сервер</string>
+    <string name="server_none">Сервер не выбран</string>
+    <string name="my_servers">Мои серверы</string>
+    <string name="action_ping">Проверить пинг</string>
+    <string name="action_update_subs">Обновить подписки</string>
+    <string name="action_always_on">Автозапуск (Постоянная VPN)</string>
+    <string name="add">Добавить</string>
+    <string name="add_from_clipboard">Вставить из буфера</string>
+    <string name="add_from_clipboard_hint">Ссылка vless://, hysteria2:// или подписка</string>
+    <string name="add_manual">Ввести вручную</string>
+    <string name="add_manual_hint">Одна или несколько ссылок, либо https://… подписки</string>
+    <string name="empty_servers">Серверов пока нет. Добавьте ссылку на сервер (vless://, hysteria2://) или адрес подписки — все серверы из неё появятся в списке.</string>
+    <string name="link_or_subscription">Ссылка или подписка</string>
+
+    <!-- МГТУ -->
+    <string name="bmstu_profile">Профиль</string>
+    <string name="bmstu_profile_name">МГТУ им. Н. Э. Баумана</string>
+    <string name="bmstu_stats">Статистика</string>
+    <string name="bmstu_duration">Длительность</string>
+    <string name="bmstu_address">Адрес в сети</string>
+    <string name="bmstu_received">Получено</string>
+    <string name="bmstu_sent">Отправлено</string>
+    <string name="bmstu_credentials">Учётные данные</string>
+    <string name="bmstu_user">Логин МГТУ</string>
+    <string name="bmstu_password">Пароль</string>
+    <string name="bmstu_password_saved">Пароль (оставьте пустым, чтобы не менять)</string>
+    <string name="bmstu_no_credentials">Не заданы</string>
+    <string name="bmstu_edit">Изменить</string>
+    <string name="bmstu_file">Файл профиля</string>
+    <string name="bmstu_upload">Импорт</string>
+    <string name="bmstu_restore">Вернуть прежний</string>
+    <string name="bmstu_log">Журнал</string>
+    <string name="bmstu_log_empty">Журнал пуст: туннель ещё не запускался.</string>
+    <string name="bmstu_copy">Копировать</string>
+    <string name="bmstu_note">Через туннель МГТУ идёт только bmstu.ru и его поддомены. Туннель работает вместе с основным VPN. Пока туннель не поднят, сайты МГТУ открываются напрямую.</string>
+
+    <!-- Напрямую -->
+    <string name="action_search">Поиск</string>
+    <string name="direct_intro">Эти адреса открываются без VPN, с вашего обычного IP. Остальной трафик идёт через выбранный сервер.</string>
+    <string name="direct_user">Добавленные вами</string>
+    <string name="direct_user_empty">Пока пусто. Добавьте сайт, если он не работает через VPN: банк, госуслуги, портал вуза.</string>
+    <string name="direct_bmstu">Через VPN МГТУ</string>
+    <string name="direct_zones">Доменные зоны</string>
+    <string name="direct_sites">Сайты и сервисы</string>
+    <string name="direct_networks">Сети и протоколы</string>
+    <string name="add_site">Добавить сайт</string>
+    <string name="add_site_hint">example.com, адрес страницы или IP</string>
+    <string name="remove">Удалить</string>
+    <string name="nothing_found">Ничего не найдено</string>
+
+    <!-- Ярлыки -->
+    <string name="shortcut_connect">Включить</string>
+    <string name="shortcut_connect_long">Включить VPN</string>
+    <string name="shortcut_disconnect">Выключить</string>
+    <string name="shortcut_disconnect_long">Выключить VPN</string>
+</resources>

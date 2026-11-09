@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_vpn"
+        android:icon="@drawable/ic_shield"
+        android:title="@string/tab_vpn" />
+    <item
+        android:id="@+id/nav_corp"
+        android:icon="@drawable/ic_school"
+        android:title="@string/tab_corp" />
+    <item
+        android:id="@+id/nav_direct"
+        android:icon="@drawable/ic_split"
+        android:title="@string/tab_direct" />
+</menu>

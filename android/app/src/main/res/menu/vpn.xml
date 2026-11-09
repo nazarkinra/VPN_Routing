@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_ping"
+        android:icon="@drawable/ic_speed"
+        android:title="@string/action_ping"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_update"
+        android:icon="@drawable/ic_refresh"
+        android:title="@string/action_update_subs"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_always_on"
+        android:title="@string/action_always_on"
+        app:showAsAction="never" />
+</menu>

@@ -1,0 +1,21 @@
+# Gradle и Android Studio
+.gradle/
+build/
+/local.properties
+.idea/
+*.iml
+/captures
+.externalNativeBuild
+.cxx
+
+# Собранные APK (Build → Generate Signed APK кладёт их в app/release) и ключи подписи
+app/release/
+app/debug/
+*.apk
+*.aab
+*.jks
+*.keystore
+keystore.properties
+
+# Исходники Java-обёрток gomobile (собираются вместе с libvpn.aar, в проекте не нужны)
+app/libs/*-sources.jar

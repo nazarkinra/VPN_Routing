@@ -1,0 +1,94 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Ключ подписи выпуска: android/keystore.properties (в .gitignore, в репозиторий не попадает).
+// Образец — keystore.properties.example. Без файла выпуск собирается неподписанным.
+def keystoreFile = rootProject.file('keystore.properties')
+def keystore = new Properties()
+if (keystoreFile.exists()) keystoreFile.withInputStream { keystore.load(it) }
+
+android {
+    compileSdk 32
+
+    signingConfigs {
+        if (keystoreFile.exists()) {
+            release {
+                storeFile file(keystore['storeFile'])
+                storePassword keystore['storePassword']
+                keyAlias keystore['keyAlias']
+                keyPassword keystore['keyPassword']
+            }
+        }
+    }
+
+    defaultConfig {
+        applicationId "com.example.vpn_routing"
+        // Ядро Xray (libv2ray.aar) собрано под Android 7.0+
+        minSdk 24
+        targetSdk 32
+        versionCode 2
+        versionName "1.1"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            // Ядро весит ~35 МБ на архитектуру, поэтому в выпуск идут только нужные телефонам
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+    }
+
+    buildTypes {
+        debug {
+            ndk {
+                // Nox (Android 7, x86): Go-ядро под трансляцией ARM (libhoudini) падает с SIGILL
+                abiFilters 'x86'
+            }
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (keystoreFile.exists()) signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    testOptions {
+        // Заглушки android.jar (TextUtils и т. п.) возвращают значения по умолчанию вместо исключения
+        unitTests.returnDefaultValues = true
+    }
+    packagingOptions {
+        jniLibs {
+            // Библиотека ядра хранится в APK сжатой: файл втрое меньше, на телефоне распаковывается при установке
+            useLegacyPackaging true
+        }
+    }
+}
+
+// Базы geoip/geosite из ядра (~27 МБ) не используются: правила задаются списками доменов
+android.applicationVariants.all { variant ->
+    variant.mergeAssetsProvider.configure {
+        doLast {
+            delete(fileTree(dir: outputDir, includes: ['geo*.dat']))
+        }
+    }
+}
+
+dependencies {
+    // Xray-core (AndroidLibXrayLite v26.10.31) + клиент OpenVPN МГТУ, собираются golib/build.ps1
+    implementation files('libs/libvpn.aar')
+
+    // Версии, совместимые с compileSdk 32 и Android Gradle Plugin 7.2
+    implementation 'androidx.appcompat:appcompat:1.4.2'
+    implementation 'com.google.android.material:material:1.6.1'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.recyclerview:recyclerview:1.2.1'
+    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
+    testImplementation 'junit:junit:4.13.2'
+    // Настоящий org.json для тестов на ПК (в android.jar только заглушки)
+    testImplementation 'org.json:json:20231013'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.3'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+}

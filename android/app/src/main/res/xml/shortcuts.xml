@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ярлыки при долгом нажатии на иконку (Android 7.1+). Их же могут вызывать приложения сценариев. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/shortcut_connect"
+        android:shortcutId="connect"
+        android:shortcutLongLabel="@string/shortcut_connect_long"
+        android:shortcutShortLabel="@string/shortcut_connect">
+        <intent
+            android:action="com.example.vpn_routing.action.CONNECT"
+            android:targetClass="com.example.vpn_routing.CommandActivity"
+            android:targetPackage="com.example.vpn_routing" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/shortcut_disconnect"
+        android:shortcutId="disconnect"
+        android:shortcutLongLabel="@string/shortcut_disconnect_long"
+        android:shortcutShortLabel="@string/shortcut_disconnect">
+        <intent
+            android:action="com.example.vpn_routing.action.DISCONNECT"
+            android:targetClass="com.example.vpn_routing.CommandActivity"
+            android:targetPackage="com.example.vpn_routing" />
+    </shortcut>
+</shortcuts>
