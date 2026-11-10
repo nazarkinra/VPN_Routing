@@ -64,6 +64,15 @@ public final class RoutingRules {
         return d;
     }
 
+    /** Список без отключённых записей (сравнение в каноническом виде). */
+    public static List<String> without(List<String> domains, Collection<String> disabled) {
+        List<String> off = new ArrayList<>();
+        for (String d : disabled) off.add(canonical(d));
+        List<String> result = new ArrayList<>();
+        for (String d : domains) if (!off.contains(canonical(d))) result.add(d);
+        return result;
+    }
+
     /** domain совпадает с одним из parents или является его поддоменом. */
     static boolean coveredBy(String domain, Collection<String> parents) {
         for (String p : parents) {

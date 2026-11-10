@@ -26,6 +26,7 @@ public class DirectFragment extends Fragment implements DirectAdapter.Callbacks 
 
     private Settings settings;
     private DirectAdapter adapter;
+    private MaterialToolbar toolbar;
     private String query = "";
 
     @Nullable
@@ -35,8 +36,12 @@ public class DirectFragment extends Fragment implements DirectAdapter.Callbacks 
         View v = inflater.inflate(R.layout.fragment_direct, container, false);
         settings = new Settings(requireContext());
 
-        MaterialToolbar toolbar = v.findViewById(R.id.toolbar);
+        toolbar = v.findViewById(R.id.toolbar);
         toolbar.inflateMenu(R.menu.direct);
+        toolbar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.action_restore_builtins) restoreBuiltins();
+            return true;
+        });
         MenuItem search = toolbar.getMenu().findItem(R.id.action_search);
         SearchView searchView = (SearchView) search.getActionView();
         searchView.setQueryHint("Домен или сайт");
@@ -72,7 +77,33 @@ public class DirectFragment extends Fragment implements DirectAdapter.Callbacks 
     private void render() {
         // Свои исключения, уже покрытые встроенными правилами (ya.ru при .ru), убираются из списка
         if (settings.compactExceptions() > 0) reloadVpn();
-        adapter.submit(settings.getExceptions(), settings.isBmstuEnabled(), query);
+        adapter.submit(settings.getExceptions(), settings.isBmstuEnabled(),
+                settings.getActiveDirectDomains(), settings.getActiveTunnelDomains(), query);
+        int disabled = settings.getDisabledBuiltins().size();
+        MenuItem restore = toolbar.getMenu().findItem(R.id.action_restore_builtins);
+        restore.setVisible(disabled > 0);
+        restore.setTitle(getString(R.string.restore_builtins) + " (" + disabled + ")");
+    }
+
+    @Override
+    public void onRemoveBuiltin(String domain, String title) {
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Убрать " + title + "?")
+                .setMessage("Это встроенное правило. Сайты из него пойдут через VPN. Вернуть его можно в меню: "
+                        + "«" + getString(R.string.restore_builtins) + "».")
+                .setPositiveButton(R.string.remove, (d, w) -> {
+                    settings.disableBuiltin(domain);
+                    render();
+                    reloadVpn();
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
+    }
+
+    private void restoreBuiltins() {
+        settings.restoreBuiltins();
+        render();
+        reloadVpn();
+        toast("Встроенные правила возвращены");
     }
 
     private void showAdd() {

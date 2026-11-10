@@ -12,6 +12,10 @@
         android:title="@string/action_update_subs"
         app:showAsAction="always" />
     <item
+        android:id="@+id/action_check_update"
+        android:title="@string/action_check_update"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_always_on"
         android:title="@string/action_always_on"
         app:showAsAction="never" />

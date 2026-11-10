@@ -68,4 +68,8 @@
     <string name="shortcut_connect_long">Включить VPN</string>
     <string name="shortcut_disconnect">Выключить</string>
     <string name="shortcut_disconnect_long">Выключить VPN</string>
+
+    <!-- Обновления и встроенные правила -->
+    <string name="action_check_update">Проверить обновления</string>
+    <string name="restore_builtins">Вернуть встроенные</string>
 </resources>

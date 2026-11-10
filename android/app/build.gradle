@@ -27,10 +27,20 @@ android {
         // Ядро Xray (libv2ray.aar) собрано под Android 7.0+
         minSdk 24
         targetSdk 32
-        versionCode 2
-        versionName "1.1"
+        versionCode 3
+        versionName "1.2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // Обновления: version.json и APK в корне репозитория. Для проверки на эмуляторе адрес можно
+        // подменить: gradlew assembleDebug -PupdateBase=http://localhost:8765/
+        def updateBase = project.findProperty('updateBase')
+        buildConfigField 'String', 'UPDATE_MANIFEST_URL', '"' + (updateBase
+                ? updateBase + 'version.json'
+                : 'https://raw.githubusercontent.com/nazarkinra/VPN_Routing/main/version.json') + '"'
+        // APK лежит в Git LFS: ссылка github.com/…/raw/… перенаправляет на сам файл, а не на указатель LFS
+        buildConfigField 'String', 'UPDATE_APK_BASE', '"' + (updateBase
+                ?: 'https://github.com/nazarkinra/VPN_Routing/raw/main/') + '"'
 
         ndk {
             // Ядро весит ~35 МБ на архитектуру, поэтому в выпуск идут только нужные телефонам

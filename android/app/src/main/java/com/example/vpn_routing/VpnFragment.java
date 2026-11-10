@@ -101,8 +101,11 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
             if (id == R.id.action_ping) pingAll();
             else if (id == R.id.action_update) refreshAll(false);
             else if (id == R.id.action_always_on) openVpnSettings();
+            else if (id == R.id.action_check_update) ((MainActivity) requireActivity()).checkForUpdates(true);
             return true;
         });
+        toolbar.getMenu().findItem(R.id.action_check_update)
+                .setTitle(getString(R.string.action_check_update) + " (v" + BuildConfig.VERSION_NAME + ")");
 
         list = root.findViewById(R.id.list);
         list.setLayoutManager(new LinearLayoutManager(requireContext()));

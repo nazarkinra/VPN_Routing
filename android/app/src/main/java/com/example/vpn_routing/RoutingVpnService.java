@@ -308,7 +308,8 @@ public class RoutingVpnService extends VpnService {
             bmstuvpn.Proxy proxy = bmstu.ensureProxy();
             route = new XrayConfig.BmstuRoute((int) proxy.port(), proxy.user(), proxy.password());
         }
-        String config = XrayConfig.build(link, serverIp, dns, settings.getExceptions(), route);
+        String config = XrayConfig.build(link, serverIp, dns, settings.getExceptions(), route,
+                settings.getActiveDirectDomains(), settings.getActiveTunnelDomains());
 
         stopCore();
         if (tun == null) tun = establishTun();

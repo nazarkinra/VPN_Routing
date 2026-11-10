@@ -65,7 +65,7 @@ public final class Settings {
         List<String> items = getExceptions();
         if (items.contains(value)) return null;
         if (!Exceptions.isCidr(value)) {
-            if (RoutingRules.isBuiltinDirect(value) || RoutingRules.coveredBy(RoutingRules.canonical(value),
+            if (isBuiltinActive(value) || RoutingRules.coveredBy(RoutingRules.canonical(value),
                     domainsOf(items))) {
                 return null;
             }
@@ -96,7 +96,7 @@ public final class Settings {
                 continue;
             }
             String c = RoutingRules.canonical(item);
-            boolean keep = domains.contains(c) && !RoutingRules.isBuiltinDirect(item);
+            boolean keep = domains.contains(c) && !isBuiltinActive(item);
             if (keep) {
                 domains.remove(c); // повтор того же домена в другом написании (.рф и xn--p1ai) не сохраняем
                 kept.add(item);
@@ -118,6 +118,48 @@ public final class Settings {
         boolean removed = items.remove(value);
         if (removed) saveExceptions(items);
         return removed;
+    }
+
+    // ---------- Встроенные правила, отключённые пользователем ----------
+
+    private static final String KEY_DISABLED_BUILTINS = "disabled_builtins";
+
+    /** Встроенные домены (из RoutingRules), которые пользователь удалил со вкладки «Напрямую». */
+    public List<String> getDisabledBuiltins() {
+        List<String> result = new ArrayList<>();
+        try {
+            JSONArray array = new JSONArray(prefs.getString(KEY_DISABLED_BUILTINS, "[]"));
+            for (int i = 0; i < array.length(); i++) result.add(array.getString(i));
+        } catch (JSONException ignored) {
+        }
+        return result;
+    }
+
+    public void disableBuiltin(String domain) {
+        List<String> items = getDisabledBuiltins();
+        String c = RoutingRules.canonical(domain);
+        if (!items.contains(c)) items.add(c);
+        prefs.edit().putString(KEY_DISABLED_BUILTINS, new JSONArray(items).toString()).apply();
+    }
+
+    /** Возвращает все встроенные правила. */
+    public void restoreBuiltins() {
+        prefs.edit().remove(KEY_DISABLED_BUILTINS).apply();
+    }
+
+    /** Действующие встроенные домены напрямую (зоны, сайты и сервисы) без отключённых. */
+    public List<String> getActiveDirectDomains() {
+        return RoutingRules.without(RoutingRules.DIRECT_DOMAINS, getDisabledBuiltins());
+    }
+
+    /** Действующие домены Cloudflare Tunnel без отключённых. */
+    public List<String> getActiveTunnelDomains() {
+        return RoutingRules.without(RoutingRules.DIRECT_TUNNEL_DOMAINS, getDisabledBuiltins());
+    }
+
+    /** Адрес уже идёт напрямую по действующим встроенным правилам. */
+    public boolean isBuiltinActive(String value) {
+        return RoutingRules.coveredBy(RoutingRules.canonical(value), getActiveDirectDomains());
     }
 
     // ---------- VPN МГТУ (аналог bmstu.auth и bmstu-source.ovpn) ----------

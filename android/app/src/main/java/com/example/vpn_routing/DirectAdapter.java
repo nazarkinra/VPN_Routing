@@ -21,7 +21,11 @@ import java.util.Locale;
 final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     interface Callbacks {
+        /** Удалить своё исключение. */
         void onRemove(String value);
+
+        /** Отключить встроенное правило (домен, как в RoutingRules); title — как он показан. */
+        void onRemoveBuiltin(String domain, String title);
     }
 
     static final int TYPE_INTRO = 0;
@@ -35,8 +39,10 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
         final String title;
         final String subtitle;
         final int icon;
-        /** Значение исключения, которое можно удалить; null — встроенное правило. */
+        /** Значение, которое можно удалить; null — закреплённая запись (сети, МГТУ). */
         final String removable;
+        /** Удаление отключает встроенное правило, а не своё исключение. */
+        boolean builtin;
         /** Подсветка значка (МГТУ — синий, свои — акцент). */
         final int tint;
         /** Скругление: первая и последняя строки группы. */
@@ -60,7 +66,8 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
     }
 
     /** Пересобрать список; query — строка поиска (пустая — показать всё). */
-    void submit(List<String> userItems, boolean bmstuEnabled, String query) {
+    void submit(List<String> userItems, boolean bmstuEnabled, List<String> directDomains,
+                List<String> tunnelDomains, String query) {
         String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         rows.clear();
         if (q.isEmpty()) rows.add(new Row(TYPE_INTRO, null, null, 0, null, 0));
@@ -80,15 +87,15 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
 
         List<Row> zones = new ArrayList<>();
         List<Row> sites = new ArrayList<>();
-        for (String d : RoutingRules.compact(RoutingRules.DIRECT_DOMAINS)) {
+        for (String d : RoutingRules.compact(directDomains)) {
             if (d.contains(".")) {
-                sites.add(entry(display(d), "сайт и все поддомены", R.drawable.ic_link, null, 0));
+                sites.add(builtin(display(d), "сайт и все поддомены", R.drawable.ic_link, d));
             } else {
-                zones.add(entry("." + display(d), "все сайты в зоне", R.drawable.ic_globe, null, 0));
+                zones.add(builtin("." + display(d), "все сайты в зоне", R.drawable.ic_globe, d));
             }
         }
-        for (String d : RoutingRules.DIRECT_TUNNEL_DOMAINS) {
-            sites.add(entry(d, "Cloudflare Tunnel", R.drawable.ic_link, null, 0));
+        for (String d : tunnelDomains) {
+            sites.add(builtin(d, "Cloudflare Tunnel", R.drawable.ic_link, d));
         }
         addSection(R.string.direct_zones, zones, q, 0);
         addSection(R.string.direct_sites, sites, q, 0);
@@ -110,6 +117,13 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
 
     private static Row entry(String title, String subtitle, int icon, String removable, int tint) {
         return new Row(TYPE_ENTRY, title, subtitle, icon, removable, tint);
+    }
+
+    /** Встроенное правило: можно удалить (отключить), вернуть — через меню «Вернуть встроенные». */
+    private static Row builtin(String title, String subtitle, int icon, String domain) {
+        Row r = new Row(TYPE_ENTRY, title, subtitle, icon, domain, 0);
+        r.builtin = true;
+        return r;
     }
 
     private void addSection(int titleRes, List<Row> items, String q, int emptyRes) {
@@ -245,7 +259,9 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
             boolean removable = row.removable != null;
             action.setVisibility(removable ? View.VISIBLE : View.GONE);
             lock.setVisibility(removable ? View.GONE : View.VISIBLE);
-            action.setOnClickListener(removable ? v -> callbacks.onRemove(row.removable) : null);
+            action.setOnClickListener(!removable ? null : row.builtin
+                    ? v -> callbacks.onRemoveBuiltin(row.removable, row.title)
+                    : v -> callbacks.onRemove(row.removable));
             itemView.setBackground(GroupBackground.create(itemView.getContext(), row.first, row.last));
         }
     }

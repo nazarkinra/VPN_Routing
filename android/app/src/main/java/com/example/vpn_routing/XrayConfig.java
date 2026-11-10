@@ -50,6 +50,17 @@ public final class XrayConfig {
      */
     public static String build(ProxyLink link, String serverIp, String localDns, Collection<String> exceptions,
                                BmstuRoute bmstu) throws JSONException {
+        return build(link, serverIp, localDns, exceptions, bmstu,
+                RoutingRules.DIRECT_DOMAINS, RoutingRules.DIRECT_TUNNEL_DOMAINS);
+    }
+
+    /**
+     * @param directDomains встроенные домены напрямую без отключённых пользователем
+     * @param tunnelDomains домены Cloudflare Tunnel без отключённых пользователем
+     */
+    public static String build(ProxyLink link, String serverIp, String localDns, Collection<String> exceptions,
+                               BmstuRoute bmstu, List<String> directDomains, List<String> tunnelDomains)
+            throws JSONException {
         List<String> userDomains = new ArrayList<>();
         List<String> userCidrs = new ArrayList<>();
         for (String item : exceptions) {
@@ -62,7 +73,7 @@ public final class XrayConfig {
         root.put("log", BuildConfig.DEBUG
                 ? new JSONObject().put("loglevel", "info").put("dnsLog", true)
                 : new JSONObject().put("loglevel", "warning").put("access", "none"));
-        root.put("dns", dns(localDns, userDomains));
+        root.put("dns", dns(localDns, directDomains, userDomains));
         root.put("inbounds", new JSONArray().put(tunInbound()));
         JSONArray outbounds = new JSONArray()
                 .put(proxyOutbound(link, serverIp))   // первый outbound — маршрут по умолчанию, как final: proxy
@@ -74,7 +85,7 @@ public final class XrayConfig {
                         .put("settings", new JSONObject().put("nonIPQuery", "reject")));
         if (bmstu != null) outbounds.put(bmstuOutbound(bmstu));
         root.put("outbounds", outbounds);
-        root.put("routing", routing(localDns, userDomains, userCidrs, bmstu != null));
+        root.put("routing", routing(localDns, directDomains, tunnelDomains, userDomains, userCidrs, bmstu != null));
         return root.toString(2);
     }
 
@@ -112,11 +123,13 @@ public final class XrayConfig {
                         .put("routeOnly", true));
     }
 
-    private static JSONObject dns(String localDns, List<String> userDomains) throws JSONException {
-        JSONArray domains = domainList(RoutingRules.DIRECT_DOMAINS, userDomains);
+    private static JSONObject dns(String localDns, List<String> directDomains, List<String> userDomains)
+            throws JSONException {
+        JSONArray domains = domainList(directDomains, userDomains);
         JSONArray servers = new JSONArray();
-        // Российские домены и исключения — через DNS текущей сети, как local-dns на Pi
-        for (String address : localDnsServers(localDns)) {
+        // Российские домены и исключения — через DNS текущей сети, как local-dns на Pi.
+        // Без доменов такой сервер стал бы общим, поэтому при пустом списке он не добавляется.
+        for (String address : domains.length() == 0 ? new LinkedHashSet<String>() : localDnsServers(localDns)) {
             servers.put(new JSONObject()
                     .put("address", address)
                     .put("port", 53)
@@ -138,7 +151,8 @@ public final class XrayConfig {
         return result;
     }
 
-    private static JSONObject routing(String localDns, List<String> userDomains, List<String> userCidrs,
+    private static JSONObject routing(String localDns, List<String> directDomains, List<String> tunnelDomains,
+                                      List<String> userDomains, List<String> userCidrs,
                                       boolean bmstu) throws JSONException {
         JSONArray rules = new JSONArray();
 
@@ -164,10 +178,11 @@ public final class XrayConfig {
 
         rules.put(rule().put("ip", toArray(RoutingRules.PRIVATE_CIDRS)).put("outboundTag", "direct"));
         rules.put(rule().put("port", RoutingRules.DIRECT_PORTS).put("outboundTag", "direct"));
-        rules.put(rule().put("domain", domainList(RoutingRules.DIRECT_TUNNEL_DOMAINS, null))
-                .put("outboundTag", "direct"));
-        rules.put(rule().put("domain", domainList(RoutingRules.DIRECT_DOMAINS, userDomains))
-                .put("outboundTag", "direct"));
+        // Правило с пустым списком доменов не добавляется (все встроенные могли быть удалены)
+        JSONArray tunnels = domainList(tunnelDomains, null);
+        if (tunnels.length() > 0) rules.put(rule().put("domain", tunnels).put("outboundTag", "direct"));
+        JSONArray direct = domainList(directDomains, userDomains);
+        if (direct.length() > 0) rules.put(rule().put("domain", direct).put("outboundTag", "direct"));
         if (!userCidrs.isEmpty()) {
             rules.put(rule().put("ip", toArray(userCidrs)).put("outboundTag", "direct"));
         }
