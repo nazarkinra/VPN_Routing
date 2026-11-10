@@ -64,6 +64,7 @@
     <string name="nothing_found">Ничего не найдено</string>
 
     <!-- Ярлыки -->
+    <string name="tile_label">VPN routing</string>
     <string name="shortcut_connect">Включить</string>
     <string name="shortcut_connect_long">Включить VPN</string>
     <string name="shortcut_disconnect">Выключить</string>

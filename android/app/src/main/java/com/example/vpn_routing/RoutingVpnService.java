@@ -122,9 +122,11 @@ public class RoutingVpnService extends VpnService {
             connectedSince = 0;
             lastDelay = 0;
         }
+        boolean changed = state != newState;
         state = newState;
         message = newMessage == null ? "" : newMessage;
         Log.i(TAG, newState + ": " + message);
+        if (changed) VpnTileService.refresh(this);
         mainHandler.post(() -> {
             for (Listener l : listeners) l.onStateChanged(state, message);
             if (state == State.CONNECTING || state == State.CONNECTED) updateNotification();
