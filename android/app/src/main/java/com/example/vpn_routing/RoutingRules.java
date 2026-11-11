@@ -40,11 +40,21 @@ public final class RoutingRules {
     /** Порты VPN-протоколов и Cloudflare Tunnel: их трафик не заворачивается в прокси. */
     public static final String DIRECT_PORTS = "2100,7844,1194,51820,500,4500,1701,1723,10808,10809";
 
-    /** Запасной DNS для российских доменов, если DNS сети не определился (Яндекс). */
-    public static final String FALLBACK_LOCAL_DNS = "77.88.8.8";
+    /**
+     * Запасные DNS для российских доменов и исключений, напрямую в обход VPN: на случай, если DNS сети
+     * не определился или не отвечает. Только TCP и DoH по IP: в корпоративных сетях (МГТУ) обычный
+     * DNS по UDP 53 на внешние серверы заблокирован, работает лишь DNS, выданный сетью.
+     * «+local» — запрос идёт с устройства напрямую, мимо правил маршрутизации.
+     */
+    public static final List<String> FALLBACK_LOCAL_DNS = Arrays.asList(
+            "tcp+local://77.88.8.8", "https+local://1.1.1.1/dns-query");
 
-    /** DNS для остальных доменов, через VPN. */
-    public static final String PROXY_DNS = "tcp://8.8.8.8";
+    /** DNS для остальных доменов: через VPN, по TCP, затем DoH — от политики сети не зависит. */
+    public static final List<String> PROXY_DNS = Arrays.asList(
+            "tcp://8.8.8.8", "https://1.1.1.1/dns-query");
+
+    /** Сколько ждать ответа одного DNS-сервера, прежде чем спросить следующий. */
+    public static final int DNS_TIMEOUT_MS = 2500;
 
     /** Исключение уже покрыто встроенными правилами (домен или его родитель в списке). */
     public static boolean isBuiltinDirect(String value) {

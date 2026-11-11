@@ -127,27 +127,33 @@ public final class XrayConfig {
             throws JSONException {
         JSONArray domains = domainList(directDomains, userDomains);
         JSONArray servers = new JSONArray();
-        // Российские домены и исключения — через DNS текущей сети, как local-dns на Pi.
-        // Без доменов такой сервер стал бы общим, поэтому при пустом списке он не добавляется.
-        for (String address : domains.length() == 0 ? new LinkedHashSet<String>() : localDnsServers(localDns)) {
-            servers.put(new JSONObject()
-                    .put("address", address)
-                    .put("port", 53)
-                    .put("domains", domains)
-                    .put("skipFallback", true));
+        // Российские домены и исключения — через DNS текущей сети (как local-dns на Pi): он работает
+        // в любой сети, в том числе корпоративной. Запасные — по TCP и DoH, не по UDP 53.
+        // Без доменов такие серверы стали бы общими, поэтому при пустом списке они не добавляются.
+        if (domains.length() > 0) {
+            if (localDns != null && !localDns.isEmpty()) {
+                servers.put(dnsServer(localDns).put("port", 53).put("domains", domains).put("skipFallback", true));
+            }
+            for (String address : RoutingRules.FALLBACK_LOCAL_DNS) {
+                servers.put(dnsServer(address).put("domains", domains).put("skipFallback", true));
+            }
         }
-        // Остальное — через Google DNS по TCP через VPN, как google-dns на Pi
-        servers.put(RoutingRules.PROXY_DNS);
+        // Остальное — через VPN: Google DNS по TCP, затем DoH Cloudflare
+        for (String address : RoutingRules.PROXY_DNS) servers.put(dnsServer(address));
         return new JSONObject()
                 .put("tag", "dns-internal")
                 .put("queryStrategy", "UseIPv4")
                 .put("servers", servers);
     }
 
+    private static JSONObject dnsServer(String address) throws JSONException {
+        return new JSONObject().put("address", address).put("timeoutMs", RoutingRules.DNS_TIMEOUT_MS);
+    }
+
+    /** DNS сети: его запросы идут напрямую по правилу маршрутизации (у запасных — «+local»). */
     private static Set<String> localDnsServers(String localDns) {
         Set<String> result = new LinkedHashSet<>();
         if (localDns != null && !localDns.isEmpty()) result.add(localDns);
-        result.add(RoutingRules.FALLBACK_LOCAL_DNS);
         return result;
     }
 
@@ -159,8 +165,10 @@ public final class XrayConfig {
         // Запросы самого DNS-модуля к DNS сети идут напрямую, к 8.8.8.8 — через VPN (правило по умолчанию)
         JSONArray localDnsIps = new JSONArray();
         for (String address : localDnsServers(localDns)) localDnsIps.put(address);
-        rules.put(rule().put("inboundTag", new JSONArray().put("dns-internal"))
-                .put("ip", localDnsIps).put("outboundTag", "direct"));
+        if (localDnsIps.length() > 0) {
+            rules.put(rule().put("inboundTag", new JSONArray().put("dns-internal"))
+                    .put("ip", localDnsIps).put("outboundTag", "direct"));
+        }
 
         // hijack-dns: любой DNS-запрос из туннеля обрабатывает DNS-модуль Xray
         rules.put(rule().put("inboundTag", new JSONArray().put("tun-in"))

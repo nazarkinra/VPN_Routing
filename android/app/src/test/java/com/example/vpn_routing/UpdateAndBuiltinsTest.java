@@ -73,6 +73,10 @@ public class UpdateAndBuiltinsTest {
             assertTrue("нет правил с пустым списком доменов", d == null || d.length() > 0);
         }
         // Без доменов DNS сети не нужен: остаётся только DNS через VPN
-        assertEquals(1, c.getJSONObject("dns").getJSONArray("servers").length());
+        JSONArray servers = c.getJSONObject("dns").getJSONArray("servers");
+        assertEquals(RoutingRules.PROXY_DNS.size(), servers.length());
+        for (int i = 0; i < servers.length(); i++) {
+            assertFalse(servers.getJSONObject(i).has("domains"));
+        }
     }
 }

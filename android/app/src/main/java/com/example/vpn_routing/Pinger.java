@@ -4,8 +4,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import java.net.Inet4Address;
-import java.net.InetAddress;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -59,8 +57,6 @@ final class Pinger {
     }
 
     private static String resolve(String host) throws Exception {
-        InetAddress[] all = InetAddress.getAllByName(host);
-        for (InetAddress a : all) if (a instanceof Inet4Address) return a.getHostAddress();
-        return all[0].getHostAddress();
+        return ServerResolver.resolve(host, null).ip;
     }
 }

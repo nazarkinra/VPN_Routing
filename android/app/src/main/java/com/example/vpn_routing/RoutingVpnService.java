@@ -49,7 +49,8 @@ public class RoutingVpnService extends VpnService {
     public static final String ACTION_BMSTU_OVPN = "com.example.vpn_routing.BMSTU_OVPN";
     public static final String EXTRA_OVPN = "ovpn";
 
-    public static final int MTU = 1500;
+    /** 1400, а не 1500: меньше риск фрагментации в сетях с туннелями и корпоративными шлюзами. */
+    public static final int MTU = 1400;
     private static final String TUN_ADDRESS = "172.19.0.1";
     private static final String TUN_ADDRESS6 = "fdfe:dcba:9876::1";
     private static final String DELAY_TEST_URL = "https://www.gstatic.com/generate_204";
@@ -83,6 +84,10 @@ public class RoutingVpnService extends VpnService {
     private BmstuManager bmstu;
     /** В действующем конфиге Xray есть маршрут bmstu.ru в туннель МГТУ. */
     private boolean appliedBmstuRoute;
+    /** Сервер запущенного ядра — для диагностики, если он не отвечает. */
+    private volatile ProxyLink appliedLink;
+    private volatile String appliedServerIp;
+    private volatile String appliedResolveMethod;
 
     // ---------- Состояние для интерфейса ----------
 
@@ -303,7 +308,9 @@ public class RoutingVpnService extends VpnService {
     /** Разбор ключа, разрешение имени сервера, сборка конфига и (пере)запуск ядра. */
     private void startCore(String url) throws Exception {
         ProxyLink link = ProxyLink.parse(url);
-        String serverIp = resolveServer(link.server);
+        ServerResolver.Result resolved = ServerResolver.resolve(link.server, physicalNetwork());
+        String serverIp = resolved.ip;
+        Log.i(TAG, "server " + link.server + " -> " + serverIp + " (" + resolved.method + ")");
         String dns = networkDns != null ? networkDns : detectDns(connectivity.getActiveNetwork());
         XrayConfig.BmstuRoute route = null;
         if (settings.isBmstuEnabled()) {
@@ -322,7 +329,20 @@ public class RoutingVpnService extends VpnService {
         core = controller;
         appliedDns = dns;
         appliedBmstuRoute = route != null;
+        appliedLink = link;
+        appliedServerIp = serverIp;
+        appliedResolveMethod = resolved.method;
         Log.i(TAG, "Xray started: " + link.describe() + " via " + serverIp + ", local DNS " + dns);
+        ConfigDump.save(this, config);
+    }
+
+    /** Физическая сеть (Wi-Fi или мобильная), не наш VPN; null — пусть решает система. */
+    private Network physicalNetwork() {
+        if (lastNetwork != null) return lastNetwork;
+        Network active = connectivity.getActiveNetwork();
+        if (active == null) return null;
+        android.net.NetworkCapabilities caps = connectivity.getNetworkCapabilities(active);
+        return caps != null && !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) ? active : null;
     }
 
     /** Окружение ядра Xray (один раз на процесс): нужно и службе, и замеру задержки серверов. */
@@ -397,24 +417,43 @@ public class RoutingVpnService extends VpnService {
                 if (state == State.CONNECTED) setState(State.CONNECTED, message + ". Задержка: " + ms + " мс");
             } catch (Exception e) {
                 if (state == State.CONNECTED) {
-                    setState(State.CONNECTED, message + ". Сервер не отвечает: " + errorText(e));
+                    setState(State.CONNECTED, message + ". Сервер не отвечает: " + errorText(e)
+                            + diagnose());
                 }
             }
         }, "delay-check").start();
     }
 
-    /** IP сервера VPN (как resolve_ip в update-vpn). Приложение исключено из туннеля, поэтому
-     *  имя разрешается DNS обычной сети, даже если нынешний ключ не работает. */
-    private static String resolveServer(String server) throws Exception {
-        InetAddress[] all;
-        try {
-            all = InetAddress.getAllByName(server);
-        } catch (Exception e) {
-            throw new IllegalStateException("Не удалось разрешить имя сервера '" + server
-                    + "'. Проверьте подключение к интернету.");
+    /**
+     * Где сломалось: (а) чем получен адрес сервера, (б) открывается ли до него TCP-соединение.
+     * Для UDP-протоколов (Hysteria2) TCP не проверить — сообщается, что сеть может блокировать UDP.
+     */
+    private String diagnose() {
+        ProxyLink link = appliedLink;
+        String ip = appliedServerIp;
+        if (link == null || ip == null) return "";
+        String where = " Адрес " + ip + " (" + appliedResolveMethod + ")";
+        if (link.isHysteria()) {
+            Log.i(TAG, "diagnose: hysteria over UDP, " + ip + ":" + link.port);
+            return where + ". Hysteria2 работает по UDP: корпоративные сети его часто блокируют,"
+                    + " выберите сервер VLESS (TCP).";
         }
-        for (InetAddress a : all) if (a instanceof Inet4Address) return a.getHostAddress();
-        return all[0].getHostAddress();
+        java.net.Socket socket = new java.net.Socket();
+        try {
+            protect(socket);
+            socket.connect(new java.net.InetSocketAddress(ip, link.port), 4000);
+            Log.i(TAG, "diagnose: TCP " + ip + ":" + link.port + " ok");
+            return where + ", TCP-порт " + link.port + " открыт: соединение есть, но сервер не принимает ключ"
+                    + " или не выпускает в интернет.";
+        } catch (Exception e) {
+            Log.i(TAG, "diagnose: TCP " + ip + ":" + link.port + " failed: " + e);
+            return where + ", TCP-порт " + link.port + " недоступен из этой сети.";
+        } finally {
+            try {
+                socket.close();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     // ---------- Слежение за сетью ----------
