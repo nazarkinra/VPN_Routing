@@ -1,0 +1,23 @@
+{
+  "versionCode": 4,
+  "versionName": "1.3",
+  "notes": "Своё окно приложения вместо страницы в браузере. Windows: VPN работает в службе «VPN routing», окну права администратора не нужны (запрос только при установке). Linux: окно — программа пользователя, VPN — служба",
+  "date": "2026-11-12",
+  "files": {
+    "linux-amd64": {
+      "file": "VPN_routing-linux-amd64.tar.gz",
+      "size": 23318867,
+      "sha256": "addf4d0da303e7a76c7d029b9913f449c0c4739c80ec780bb7e4987dc69bf3f3"
+    },
+    "windows-amd64": {
+      "file": "VPN_routing-windows.zip",
+      "size": 23766453,
+      "sha256": "7b8ea870002b70f289c2fd42de79609b7809110e0914b593236b3a08aecd686e"
+    },
+    "windows-setup": {
+      "file": "VPN_routing-setup.exe",
+      "size": 25994752,
+      "sha256": "66ac388293cf26329e01bf1bae8a098d2d2228d1c57efeffcee5916f90ca7262"
+    }
+  }
+}

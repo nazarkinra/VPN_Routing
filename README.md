@@ -11,11 +11,19 @@ VLESS/Hysteria2-сервер, сайты МГТУ — через корпора�
 
 Собирается командой `android\publish_apk.ps1` (подписанный выпуск кладётся сюда, в корень).
 
+## Скачать для Windows и Linux
+
+**[VPN_routing-setup.exe](VPN_routing-setup.exe)** — установщик для Windows 10/11 x64: ярлыки в меню «Пуск» и на
+рабочем столе, удаление — в «Параметры → Приложения».
+**[VPN_routing-linux-amd64.tar.gz](VPN_routing-linux-amd64.tar.gz)** — Linux x86-64 (Ubuntu 24.04+ и подобные): распакуйте и запустите
+`sudo ./VPN_routing/install.sh`, ярлык появится в меню приложений.
+Новые версии приложение предлагает само. Собирается командой `desktop\publish.ps1`.
+
 ## Состав репозитория
 
 | Папка | Что внутри |
 |---|---|
 | [`android/`](android/) | Приложение для Android: Xray-core в VpnService, подписки, клиент OpenVPN МГТУ |
-| [`desktop/`](desktop/) | Приложение для Windows и Linux: то же ядро Xray и клиент МГТУ, окно в браузере, значок в трее |
+| [`desktop/`](desktop/) | Приложение для Windows и Linux: то же ядро Xray и клиент МГТУ, своё окно, значок в трее |
 
 Подробности, сборка и устройство — в README каждого приложения.
