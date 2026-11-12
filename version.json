@@ -1,9 +1,9 @@
 {
-    "versionCode":  5,
-    "versionName":  "1.4",
+    "versionCode":  6,
+    "versionName":  "1.5",
     "apk":  "VPN_routing.apk",
-    "size":  44414335,
-    "sha256":  "4aa4e6572e3d39f6d4f4edf8d32b76c292116a21d8f17f84309860a459976787",
-    "notes":  "Работа в корпоративных сетях (Wi-Fi МГТУ): DNS без UDP 53 на внешние серверы, запасные DNS по TCP и DoH, адрес сервера через DoH и TCP, MTU 1400, диагностика при недоступном сервере",
-    "date":  "2026-11-11"
+    "size":  44415267,
+    "sha256":  "be810f2f8c480f4bbdb4002890f271b52bf957a68bd74550ce508c6a85d8f698",
+    "notes":  "Mi Share, Quick Share и другие передачи по Wi-Fi Direct работают при включённом VPN: локальные сети (Wi-Fi Direct, домашняя сеть, link-local, multicast) больше не идут в туннель",
+    "date":  "2026-11-12"
 }

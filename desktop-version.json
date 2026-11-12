@@ -1,23 +1,23 @@
 {
-  "versionCode": 4,
-  "versionName": "1.3",
-  "notes": "Своё окно приложения вместо страницы в браузере. Windows: VPN работает в службе «VPN routing», окну права администратора не нужны (запрос только при установке). Linux: окно — программа пользователя, VPN — служба",
+  "versionCode": 5,
+  "versionName": "1.4",
+  "notes": "Windows: если видеодрайвер не даёт OpenGL (белое окно), окно само переходит на программную отрисовку (Mesa); журнал окна gui.log. Linux: значок приложения в панели задач GNOME вместо шестерёнки",
   "date": "2026-11-12",
   "files": {
     "linux-amd64": {
       "file": "VPN_routing-linux-amd64.tar.gz",
-      "size": 23318867,
-      "sha256": "addf4d0da303e7a76c7d029b9913f449c0c4739c80ec780bb7e4987dc69bf3f3"
+      "size": 23344331,
+      "sha256": "b959e283999334444b46722a1b17fe4a5a6305ef2f9bcca806a01a43d1172815"
     },
     "windows-amd64": {
       "file": "VPN_routing-windows.zip",
-      "size": 23766453,
-      "sha256": "7b8ea870002b70f289c2fd42de79609b7809110e0914b593236b3a08aecd686e"
+      "size": 48276227,
+      "sha256": "cbf2624b1fe2965e3af39c1d88a47d483b72e19de3f95dad6a4ef41a837da5a3"
     },
     "windows-setup": {
       "file": "VPN_routing-setup.exe",
-      "size": 25994752,
-      "sha256": "66ac388293cf26329e01bf1bae8a098d2d2228d1c57efeffcee5916f90ca7262"
+      "size": 49038848,
+      "sha256": "bc8058185884154edef6ed13319fdb071c45b3f76ad691f7a888e2db63d56fbd"
     }
   }
 }
