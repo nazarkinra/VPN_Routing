@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -28,7 +29,7 @@ func launch(dir string, args []string, flags map[string]bool) {
 		return
 	}
 	if install.ServiceInstalled() {
-		runServiceGUI(dir, flags)
+		runServiceGUI(dir, args, flags)
 		return
 	}
 	runPortable(dir, args, flags)
@@ -82,15 +83,30 @@ func runWindowsService() {
 // guiPipe — канал «показать окно» этого пользователя: второй запуск ярлыка показывает открытое окно.
 func guiPipe() string { return `\\.\pipe\vpnrouting-gui-` + install.CurrentUserSID() }
 
-func runServiceGUI(dir string, flags map[string]bool) {
+func runServiceGUI(dir string, args []string, flags map[string]bool) {
 	if c, err := winio.DialPipe(guiPipe(), nil); err == nil {
 		_, _ = c.Write([]byte("show\n"))
 		c.Close()
 		return
 	}
+	// Видеодрайвер не даёт OpenGL — окно из копии программы с программной отрисовкой
+	if redirectSoftGL(dir, args) {
+		return
+	}
 	c := client(dir)
 	if _, err := c.State(); err != nil {
 		go func() { _ = startService(dir) }()
+	}
+	prepareGUI(dir)
+	var ln net.Listener
+	// Ошибка OpenGL: новое окно с программной отрисовкой (канал отпускается, иначе новое окно отдаст
+	// команду «показать» этому и закроется)
+	glRestart = func() {
+		if ln != nil {
+			ln.Close()
+		}
+		_ = spawnDetached(mainExe(), nil)
+		os.Exit(0)
 	}
 	var ui *gui.UI
 	ui = gui.New(gui.Options{
@@ -109,15 +125,15 @@ func runServiceGUI(dir string, flags map[string]bool) {
 			if v == version {
 				return
 			}
-			if exe, err := os.Executable(); err == nil {
-				_ = exec.Command(exe, "--hidden").Start()
-			}
+			// (из копии с программной отрисовкой — саму программу: копию она обновит)
+			_ = exec.Command(mainExe(), "--hidden").Start()
 			ui.Quit()
 		},
 	})
-	if ln, err := winio.ListenPipe(guiPipe(), &winio.PipeConfig{
+	if l, err := winio.ListenPipe(guiPipe(), &winio.PipeConfig{
 		SecurityDescriptor: "D:P(A;;GA;;;" + install.CurrentUserSID() + ")",
 	}); err == nil {
+		ln = l
 		go func() {
 			for {
 				conn, err := ln.Accept()
@@ -162,7 +178,12 @@ func runPortable(dir string, args []string, flags map[string]bool) {
 		}
 		return
 	}
+	if redirectSoftGL(dir, args) {
+		return
+	}
 	b := startBackend(dir, flags)
+	// Здесь VPN в этом же процессе: при ошибке OpenGL окно не перезапускается, а просит перезапуска
+	prepareGUI(dir)
 	ui := gui.New(gui.Options{
 		Client: api.Local(b.server.Handler()),
 		Tray:   true,

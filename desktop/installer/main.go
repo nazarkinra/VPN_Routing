@@ -33,7 +33,9 @@ func main() {
 		}
 	}
 	files := map[string][]byte{}
-	for _, name := range []string{install.ExeName, "wintun.dll", "wintun-LICENSE.txt"} {
+	// softgl/ — программная отрисовка окна (Mesa), если видеодрайвер не даёт OpenGL 2.1
+	for _, name := range []string{install.ExeName, "wintun.dll", "wintun-LICENSE.txt",
+		"softgl/opengl32.dll", "softgl/libgallium_wgl.dll", "softgl/README.txt"} {
 		// build.ps1 кладёт файлы сжатыми (.gz): установщик вдвое меньше
 		if b, err := payload.ReadFile("payload/" + name + ".gz"); err == nil {
 			if zr, err := gzip.NewReader(bytes.NewReader(b)); err == nil {

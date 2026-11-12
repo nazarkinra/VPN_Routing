@@ -98,6 +98,14 @@ Hysteria2 работает по UDP и в корпоративной сети м
 чем получен адрес сервера. Рабочий конфиг ядра со скрытыми UUID, ключами и паролями лежит в папке настроек
 (`xray_config.json`), кнопка «Копировать» — в настройках, раздел «Диагностика».
 
+## Окно и видеодрайвер (Windows)
+
+Окно рисуется через OpenGL 2.1. Если видеодрайвер его не даёт (нет драйвера, «Базовый видеоадаптер
+Microsoft», виртуальная машина), окно само перезапускается с программной отрисовкой — Mesa llvmpipe из папки
+`softgl` рядом с программой (окно запускается из её копии в `%LOCALAPPDATA%\VPN routing\softgl`, потому что
+`opengl32.dll` Windows берёт из папки программы). Выбор запоминается файлом `softgl` в `%APPDATA%\VPN routing`;
+включить вручную — переменная `VPNROUTING_SOFTGL=1`. Журнал окна — `%APPDATA%\VPN routing\gui.log`.
+
 ## Обновления
 
 При запуске и затем раз в 12 часов приложение читает `desktop-version.json` из корня репозитория на GitHub.
@@ -137,12 +145,13 @@ powershell -ExecutionPolicy Bypass -File desktop\build.ps1
 
 Скрипт прогоняет тесты, собирает `dist\windows\vpnrouting.exe` и `dist\linux-amd64\vpnrouting` в WSL
 (`build-wsl.sh`: окну нужен компилятор C), установщик и один раз скачивает `wintun.dll` с https://www.wintun.net
-(сверяя контрольную сумму). На Linux без WSL — `desktop/build.sh`.
+и Mesa для программной отрисовки окна с https://github.com/pal1000/mesa-dist-win (сверяя контрольные суммы;
+архив Mesa распаковывается командой `7z` в WSL). На Linux без WSL — `desktop/build.sh`.
 
 Что нужно в WSL (Ubuntu 24.04), один раз:
 
 ```bash
-sudo apt install -y build-essential pkg-config libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev gcc-mingw-w64-x86-64
+sudo apt install -y build-essential pkg-config libgl1-mesa-dev xorg-dev libxkbcommon-dev libwayland-dev gcc-mingw-w64-x86-64 7zip
 ```
 
 и Go 1.27+ в `~/.local/go`. Если apt не может скачать пакеты с `archive.ubuntu.com`, переключите источники на

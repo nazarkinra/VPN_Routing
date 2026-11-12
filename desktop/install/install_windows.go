@@ -129,9 +129,14 @@ func installedProcesses() []uint32 {
 		}
 		buf := make([]uint16, windows.MAX_PATH)
 		n := uint32(len(buf))
-		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil &&
-			strings.EqualFold(filepath.Dir(windows.UTF16ToString(buf[:n])), Dir()) {
-			pids = append(pids, pe.ProcessID)
+		if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) == nil {
+			dir := filepath.Dir(windows.UTF16ToString(buf[:n]))
+			// и окна с программной отрисовкой: копия программы в %LOCALAPPDATA%\VPN routing\softgl
+			softgl := strings.EqualFold(filepath.Base(dir), "softgl") &&
+				strings.EqualFold(filepath.Base(filepath.Dir(dir)), AppName)
+			if strings.EqualFold(dir, Dir()) || softgl {
+				pids = append(pids, pe.ProcessID)
+			}
 		}
 		windows.CloseHandle(h)
 	}
@@ -154,7 +159,11 @@ func Install(files map[string][]byte, version string, desktopShortcut bool) erro
 	var size int64
 	for name, data := range files {
 		size += int64(len(data))
-		if err := writeReplacing(filepath.Join(dir, name), data); err != nil {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := writeReplacing(path, data); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
@@ -275,6 +284,10 @@ func Uninstall(dataDir string, purge bool) error {
 	_ = os.Remove(startMenuLink())
 	_ = os.Remove(desktopLink())
 	_ = registry.DeleteKey(registry.LOCAL_MACHINE, uninstallKey)
+	// Копия программы для программной отрисовки окна (у этого пользователя)
+	if cache, err := os.UserCacheDir(); err == nil {
+		_ = os.RemoveAll(filepath.Join(cache, AppName))
+	}
 	if purge {
 		if dataDir != "" {
 			_ = os.RemoveAll(dataDir)

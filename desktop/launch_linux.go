@@ -61,6 +61,9 @@ func runService(dir string, flags map[string]bool) {
 		return
 	}
 	b := startBackend(dir, flags)
+	if install.ServiceInstalled() {
+		go install.RefreshDesktopEntry()
+	}
 	if os.Getenv("INVOCATION_ID") == "" {
 		fmt.Println("VPN routing работает. Окно управления: «VPN routing» в меню приложений или команда vpnrouting " +
 			"(без sudo, от вашего пользователя). Выход — Ctrl+C.")

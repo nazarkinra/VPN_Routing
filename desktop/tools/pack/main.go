@@ -61,6 +61,10 @@ func main() {
 		{filepath.Join(*dist, "windows", "vpnrouting.exe"), "vpnrouting.exe"},
 		{filepath.Join(*dist, "windows", "wintun.dll"), "wintun.dll"},
 		{filepath.Join(*dist, "windows", "wintun-LICENSE.txt"), "wintun-LICENSE.txt"},
+		// Программная отрисовка окна (Mesa): самообновление тоже берёт её из этого архива
+		{filepath.Join(*dist, "windows", "softgl", "opengl32.dll"), "softgl/opengl32.dll"},
+		{filepath.Join(*dist, "windows", "softgl", "libgallium_wgl.dll"), "softgl/libgallium_wgl.dll"},
+		{filepath.Join(*dist, "windows", "softgl", "README.txt"), "softgl/README.txt"},
 		{*readme, "README.md"},
 	}
 	m.Files["windows-amd64"] = pack(filepath.Join(*out, "VPN_routing-windows.zip"), win, writeZip)

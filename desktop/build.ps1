@@ -45,6 +45,33 @@ if (-not (Test-Path $wintun)) {
     }
 }
 
+# Mesa (llvmpipe) — программная отрисовка окна, если видеодрайвер не даёт OpenGL 2.1 (иначе окно белое).
+# Сборка https://github.com/pal1000/mesa-dist-win, из неё нужны две DLL для x64. Скачивается один раз,
+# контрольная сумма проверяется; архив .7z распаковывается в WSL (sudo apt install 7zip).
+$softgl = Join-Path $dist 'windows\softgl'
+if (-not (Test-Path (Join-Path $softgl 'libgallium_wgl.dll'))) {
+    $mesa = '26.2.4'
+    $sha256 = '351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695'
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("mesa-" + [Guid]::NewGuid())
+    New-Item -ItemType Directory $tmp | Out-Null
+    try {
+        $archive = Join-Path $tmp 'mesa.7z'
+        Write-Host "Загрузка Mesa $mesa…"
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest "https://github.com/pal1000/mesa-dist-win/releases/download/$mesa/mesa3d-$mesa-release-msvc.7z" -OutFile $archive -UseBasicParsing
+        $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+        if ($hash -ne $sha256) { throw "контрольная сумма mesa3d-$mesa-release-msvc.7z не совпала: $hash" }
+        $wslTmp = '/mnt/' + $tmp.Substring(0, 1).ToLower() + ($tmp.Substring(2) -replace '\\', '/')
+        wsl.exe -d Ubuntu-24.04 -- 7z e -y "-o$wslTmp/x64" "$wslTmp/mesa.7z" x64/opengl32.dll x64/libgallium_wgl.dll | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'не удалось распаковать Mesa (нужен 7z в WSL: sudo apt install 7zip)' }
+        New-Item -ItemType Directory -Force $softgl | Out-Null
+        foreach ($f in 'opengl32.dll', 'libgallium_wgl.dll') { Copy-Item (Join-Path $tmp "x64\$f") (Join-Path $softgl $f) }
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+Copy-Item (Join-Path $PSScriptRoot 'assets\softgl-README.txt') (Join-Path $softgl 'README.txt')
+
 # Значок, версия и манифест exe (у установщика — запрос прав администратора)
 Write-Host 'Ресурсы:'
 go run ./tools/res -syso rsrc_windows_amd64.syso -desc 'VPN routing' -name vpnrouting.exe
@@ -65,7 +92,10 @@ wsl.exe -d Ubuntu-24.04 -- bash "$wslDir/build-wsl.sh" dist
 if ($LASTEXITCODE -ne 0) { throw 'WSL build failed' }
 # Установщик: программа и wintun.dll внутри него
 $payload = Join-Path $PSScriptRoot 'installer\payload'
-foreach ($f in 'vpnrouting.exe', 'wintun.dll', 'wintun-LICENSE.txt') {
+$payloadFiles = 'vpnrouting.exe', 'wintun.dll', 'wintun-LICENSE.txt',
+    'softgl\opengl32.dll', 'softgl\libgallium_wgl.dll', 'softgl\README.txt'
+New-Item -ItemType Directory -Force (Join-Path $payload 'softgl') | Out-Null
+foreach ($f in $payloadFiles) {
     # Сжатыми: установщик вдвое меньше
     $in = [IO.File]::OpenRead((Join-Path $dist "windows\$f"))
     $out = [IO.File]::Create((Join-Path $payload "$f.gz"))
@@ -75,9 +105,10 @@ foreach ($f in 'vpnrouting.exe', 'wintun.dll', 'wintun-LICENSE.txt') {
 try {
     Build windows amd64 (Join-Path $dist 'VPN_routing-setup.exe') '-H windowsgui' './installer'
 } finally {
-    foreach ($f in 'vpnrouting.exe', 'wintun.dll', 'wintun-LICENSE.txt') {
+    foreach ($f in $payloadFiles) {
         Remove-Item (Join-Path $payload "$f.gz") -ErrorAction SilentlyContinue
     }
+    Remove-Item (Join-Path $payload 'softgl') -Recurse -Force -ErrorAction SilentlyContinue
 }
 Remove-Item Env:GOOS, Env:GOARCH
 

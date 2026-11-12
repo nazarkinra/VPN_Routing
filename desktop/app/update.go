@@ -318,6 +318,10 @@ func (u *Updater) install(info *UpdateInfo) error {
 	if err := replaceExecutable(bin); err != nil {
 		return err
 	}
+	// Программная отрисовка окна (Mesa, только Windows) — рядом с программой; без неё программа работает
+	if err := extractSoftGL(buf.Bytes(), info.URL); err != nil {
+		logf("обновление: программная отрисовка: %v", err)
+	}
 	// Версия в «Параметры → Приложения», если программа установлена установщиком
 	install.SetInstalledVersion(info.VersionName)
 	return nil
@@ -389,12 +393,70 @@ func replaceExecutable(bin []byte) error {
 	return nil
 }
 
-// CleanupOldExecutable удаляет программу, оставшуюся от прошлого обновления.
+// SoftGLDir — папка программной отрисовки окна в архиве и рядом с программой (Windows).
+const SoftGLDir = "softgl"
+
+// extractSoftGL кладёт файлы softgl/ из архива .zip в папку программы (изменившиеся — заменяет).
+// Загруженную окном DLL перезаписать нельзя, а переименовать можно: старая уходит в .old.
+func extractSoftGL(data []byte, name string) error {
+	if !strings.HasSuffix(strings.ToLower(name), ".zip") {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(filepath.Dir(exe), SoftGLDir)
+	for _, f := range zr.File {
+		if filepath.Base(filepath.Dir(f.Name)) != SoftGLDir || f.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		b, err := io.ReadAll(io.LimitReader(rc, maxArchive))
+		rc.Close()
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(dir, filepath.Base(f.Name))
+		if old, err := os.ReadFile(dst); err == nil && bytes.Equal(old, b) {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst+".new", b, 0o644); err != nil {
+			return err
+		}
+		_ = os.Remove(dst + ".old")
+		_ = os.Rename(dst, dst+".old")
+		if err := os.Rename(dst+".new", dst); err != nil {
+			_ = os.Rename(dst+".old", dst)
+			return err
+		}
+	}
+	return nil
+}
+
+// CleanupOldExecutable удаляет программу (и файлы softgl), оставшиеся от прошлого обновления.
 func CleanupOldExecutable() {
 	if exe, err := os.Executable(); err == nil {
 		if p, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = p
 		}
 		_ = os.Remove(exe + ".old")
+		old, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), SoftGLDir, "*.old"))
+		for _, f := range old {
+			_ = os.Remove(f)
+		}
 	}
 }

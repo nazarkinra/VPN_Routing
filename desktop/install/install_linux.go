@@ -65,8 +65,27 @@ var desktopEntry = strings.Join([]string{
 	"Categories=Network;",
 	"Keywords=VPN;VLESS;Xray;Proxy;МГТУ;",
 	"StartupNotify=false",
+	// WM class (X11) / app_id (Wayland) окна Fyne — его заголовок. Без этой строки GNOME не связывает
+	// окно с ярлыком и показывает в панели задач шестерёнку вместо значка.
+	"StartupWMClass=" + WindowTitle,
 	"",
 }, "\n")
+
+// WindowTitle — заголовок окна (gui), он же WM class окна.
+const WindowTitle = "VPN routing"
+
+// RefreshDesktopEntry обновляет ярлык установленной программы, если он устарел: самообновление
+// заменяет только программу, а ярлык остаётся от прежней версии. Вызывается службой (root).
+func RefreshDesktopEntry() {
+	old, err := os.ReadFile(desktopPath)
+	if err != nil || string(old) == desktopEntry {
+		return
+	}
+	if err := os.WriteFile(desktopPath, []byte(desktopEntry), 0o644); err != nil {
+		return
+	}
+	_ = exec.Command("update-desktop-database", "-q", "/usr/share/applications").Run()
+}
 
 // Installed — программа установлена.
 func Installed() bool {

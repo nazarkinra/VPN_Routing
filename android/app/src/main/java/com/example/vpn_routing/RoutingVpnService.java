@@ -358,11 +358,16 @@ public class RoutingVpnService extends VpnService {
                 .setSession(getString(R.string.app_name))
                 .setMtu(MTU)
                 .addAddress(TUN_ADDRESS, 30)
-                .addRoute("0.0.0.0", 0)
                 .addAddress(TUN_ADDRESS6, 126)
-                // IPv6 тоже в туннель, иначе он уходил бы мимо VPN
-                .addRoute("::", 0)
                 .addDnsServer(XrayConfig.TUN_DNS);
+        // В туннель — весь интернет (IPv6 тоже, иначе он уходил бы мимо VPN), кроме локальных сетей:
+        // Wi-Fi Direct (Mi Share, Quick Share) через туннель не работает, см. TunRoutes
+        for (TunRoutes.Route r : TunRoutes.ipv4()) builder.addRoute(r.address, r.prefix);
+        for (TunRoutes.Route r : TunRoutes.ipv6()) builder.addRoute(r.address, r.prefix);
+        // Сеть самого туннеля (в ней DNS 172.19.0.2) — внутри исключённых 172.16.0.0/12 и fc00::/7
+        // (адрес сети без битов хоста: старые Android иначе отвечают «Bad address»)
+        builder.addRoute("172.19.0.0", 30);
+        builder.addRoute("fdfe:dcba:9876::", 126);
         try {
             // Соединения самого Xray (к VPS и напрямую) идут мимо туннеля — как sockopt.interface на Pi
             builder.addDisallowedApplication(getPackageName());
