@@ -67,7 +67,11 @@ type arr = []any
 //	localDNS   — DNS текущей сети (роутер или провайдер) для российских доменов, может быть ""
 //	exceptions — исключения пользователя (домены и подсети)
 //	bmstu      — прокси туннеля МГТУ или nil, если VPN МГТУ выключен
+//
+// link == nil — режим «только МГТУ»: основного сервера нет, bmstu.ru идёт в туннель университета,
+// всё остальное (и DNS) — напрямую.
 func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string, builtins Builtins, bmstu *BmstuRoute, tun TunOptions) (string, error) {
+	corpOnly := link == nil
 	var userDomains, userCIDRs []string
 	for _, item := range exceptions {
 		if IsCIDR(item) {
@@ -85,27 +89,35 @@ func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string
 		logCfg["error"] = tun.LogFile
 	}
 
-	proxy, err := proxyOutbound(link, serverIP)
-	if err != nil {
-		return "", err
+	// Первый outbound — маршрут по умолчанию: proxy (как final: proxy), без основного VPN — direct
+	var outbounds arr
+	if !corpOnly {
+		proxy, err := proxyOutbound(link, serverIP)
+		if err != nil {
+			return "", err
+		}
+		outbounds = append(outbounds, proxy)
 	}
-	outbounds := arr{
-		proxy, // первый outbound — маршрут по умолчанию, как final: proxy
+	outbounds = append(outbounds,
 		obj{"tag": "direct", "protocol": "freedom",
 			"streamSettings": obj{"sockopt": obj{"domainStrategy": "UseIPv4"}}},
 		obj{"tag": "block", "protocol": "blackhole"},
 		obj{"tag": "dns-out", "protocol": "dns", "settings": obj{"nonIPQuery": "reject"}},
-	}
+	)
 	if bmstu != nil {
 		outbounds = append(outbounds, bmstuOutbound(bmstu))
 	}
 
+	dns := dnsConfig(localDNS, builtins.Direct, userDomains)
+	if corpOnly {
+		dns = directDNSConfig(localDNS)
+	}
 	root := obj{
 		"log":       logCfg,
-		"dns":       dnsConfig(localDNS, builtins.Direct, userDomains),
+		"dns":       dns,
 		"inbounds":  arr{tunInbound(tun)},
 		"outbounds": outbounds,
-		"routing":   routing(localDNS, builtins, userDomains, userCIDRs, bmstu != nil),
+		"routing":   routing(localDNS, builtins, userDomains, userCIDRs, bmstu != nil, corpOnly),
 	}
 	b, err := json.MarshalIndent(root, "", "  ")
 	return string(b), err
@@ -201,6 +213,20 @@ func dnsConfig(localDNS string, direct, userDomains []string) obj {
 	return obj{"tag": "dns-internal", "queryStrategy": "UseIPv4", "servers": servers}
 }
 
+// directDNSConfig — DNS без основного VPN: все домены через DNS сети, затем запасные (TCP и DoH напрямую).
+func directDNSConfig(localDNS string) obj {
+	var servers arr
+	if localDNS != "" {
+		s := dnsServer(localDNS)
+		s["port"] = 53
+		servers = append(servers, s)
+	}
+	for _, address := range FallbackLocalDNS {
+		servers = append(servers, dnsServer(address))
+	}
+	return obj{"tag": "dns-internal", "queryStrategy": "UseIPv4", "servers": servers}
+}
+
 func rule(kv ...any) obj {
 	r := obj{"type": "field"}
 	for i := 0; i+1 < len(kv); i += 2 {
@@ -217,7 +243,7 @@ func toArr(items []string) arr {
 	return a
 }
 
-func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string, bmstu bool) obj {
+func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string, bmstu, corpOnly bool) obj {
 	var rules arr
 	// Запросы DNS-модуля к DNS сети идут напрямую, к 8.8.8.8 — через VPN (правило по умолчанию)
 	// (у запасных серверов «+local»: они и так идут мимо правил)
@@ -231,6 +257,10 @@ func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string
 		rules = append(rules, rule("domain", arr{"domain:" + BmstuDomain}, "network", "tcp", "outboundTag", "bmstu"))
 		// QUIC к сайтам МГТУ отклоняется: прокси туннеля только TCP, браузер перейдёт на TCP
 		rules = append(rules, rule("domain", arr{"domain:" + BmstuDomain}, "network", "udp", "port", "443", "outboundTag", "block"))
+	}
+	// Без основного VPN всё остальное и так идёт напрямую: остальные правила не нужны
+	if corpOnly {
+		return obj{"domainStrategy": "AsIs", "rules": rules}
 	}
 	rules = append(rules, rule("ip", toArr(PrivateCIDRs), "outboundTag", "direct"))
 	rules = append(rules, rule("port", DirectPorts, "outboundTag", "direct"))

@@ -37,7 +37,8 @@ func TunName() string {
 	return "vpnrouting0"
 }
 
-// Status — состояние для интерфейса.
+// Status — состояние основного VPN для интерфейса. VPN МГТУ — отдельная часть со своим состоянием
+// (Bmstu().Status() и CorpOn()); обе части работают в одном ядре Xray, но включаются независимо.
 type Status struct {
 	State   State  `json:"state"`
 	Message string `json:"message"`
@@ -47,7 +48,8 @@ type Status struct {
 	Delay int64 `json:"delay"`
 }
 
-// VPN — служба основного VPN. Все действия выполняются по очереди в одном потоке, как в Android-службе.
+// VPN — служба: ядро Xray с TUN. Работает, пока включена хотя бы одна часть — основной VPN или VPN МГТУ.
+// Все действия выполняются по очереди в одном потоке, как в Android-службе.
 type VPN struct {
 	store   *Store
 	bmstu   *Bmstu
@@ -60,7 +62,8 @@ type VPN struct {
 	inst     *xcore.Instance
 	onChange []func()
 
-	// Только в рабочем потоке
+	// Только в рабочем потоке. Включён ли VPN МГТУ — флаг в настройках (store.BmstuEnabled).
+	mainOn       bool
 	appliedDNS   string
 	appliedBmstu bool
 	watching     chan struct{}
@@ -97,18 +100,28 @@ func (v *VPN) OnChange(f func()) {
 	v.mu.Unlock()
 }
 
-// Status — снимок состояния.
+// Status — снимок состояния основного VPN.
 func (v *VPN) Status() Status {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.status
 }
 
-// Active — VPN подключён или подключается.
-func (v *VPN) Active() bool {
+// Running — работает ядро (включена хотя бы одна часть).
+func (v *VPN) Running() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.inst != nil
+}
+
+// MainActive — основной VPN подключён или подключается.
+func (v *VPN) MainActive() bool {
 	s := v.Status().State
 	return s == StateConnected || s == StateConnecting
 }
+
+// CorpOn — VPN МГТУ включён (туннель подключён, подключается или ждёт повтора).
+func (v *VPN) CorpOn() bool { return v.Running() && v.store.BmstuEnabled() }
 
 func (v *VPN) post(f func()) { v.work <- f }
 
@@ -122,9 +135,15 @@ func (v *VPN) setState(state State, message string) {
 		v.status.Delay = 0
 	}
 	v.status.State, v.status.Message = state, message
-	listeners := append([]func(){}, v.onChange...)
 	v.mu.Unlock()
 	logf("vpn %s: %s", state, message)
+	v.notify()
+}
+
+func (v *VPN) notify() {
+	v.mu.Lock()
+	listeners := append([]func(){}, v.onChange...)
+	v.mu.Unlock()
 	for _, f := range listeners {
 		f()
 	}
@@ -132,18 +151,68 @@ func (v *VPN) setState(state State, message string) {
 
 // ---------- Команды ----------
 
-// Start — подключить с выбранным сервером.
-func (v *VPN) Start() { v.post(v.startInternal) }
+// Start — включить основной VPN (VPN МГТУ, если работает, не трогается).
+func (v *VPN) Start() {
+	v.post(func() {
+		// Всё было выключено: включается только основной (флаг МГТУ мог остаться от прошлого запуска)
+		if v.inst == nil {
+			v.store.SetBmstuEnabled(false)
+		}
+		v.mainOn = true
+		v.apply()
+	})
+}
 
-// Stop — отключить.
-func (v *VPN) Stop() { v.post(v.stopEverything) }
+// StopMain — выключить основной VPN (VPN МГТУ, если включён, продолжает работать).
+func (v *VPN) StopMain() {
+	v.post(func() {
+		v.mainOn = false
+		v.apply()
+	})
+}
 
-// Toggle — переключить.
+// StartCorp — включить VPN МГТУ (основной VPN не трогается).
+func (v *VPN) StartCorp() {
+	v.post(func() {
+		v.store.SetBmstuEnabled(true)
+		v.apply()
+	})
+}
+
+// StopCorp — выключить VPN МГТУ (основной VPN не трогается).
+func (v *VPN) StopCorp() {
+	v.post(func() {
+		v.store.SetBmstuEnabled(false)
+		v.apply()
+	})
+}
+
+// Restore — включить части, как в прошлый раз: основной — если main, МГТУ — по сохранённому флагу.
+func (v *VPN) Restore(main bool) {
+	v.post(func() {
+		v.mainOn = main
+		v.apply()
+	})
+}
+
+// Stop — выключить всё.
+func (v *VPN) Stop() { v.post(func() { v.stopEverything(true) }) }
+
+// Toggle — переключить основной VPN.
 func (v *VPN) Toggle() {
-	if v.Active() {
-		v.Stop()
+	if v.MainActive() {
+		v.StopMain()
 	} else {
 		v.Start()
+	}
+}
+
+// ToggleCorp — переключить VPN МГТУ.
+func (v *VPN) ToggleCorp() {
+	if v.CorpOn() {
+		v.StopCorp()
+	} else {
+		v.StartCorp()
 	}
 }
 
@@ -159,35 +228,30 @@ func (v *VPN) Reload() {
 // ApplyKey — сменить сервер; если новый не запустится, вернуть прежний (как update-vpn).
 func (v *VPN) ApplyKey(url string) { v.post(func() { v.applyKeyInternal(url) }) }
 
-// BmstuSync — изменились настройки VPN МГТУ: обновить маршруты и переподключить туннель.
+// BmstuSync — изменились логин, пароль или файл МГТУ: переподключить туннель, если он включён.
 func (v *VPN) BmstuSync() {
 	v.post(func() {
-		if v.inst == nil {
-			return
+		if v.inst != nil && v.store.BmstuEnabled() {
+			v.bmstu.Restart()
 		}
-		// Маршрут bmstu.ru добавляется в Xray или убирается из него только при включении и выключении
-		if v.appliedBmstu != v.store.BmstuEnabled() {
-			v.restartCore("Маршруты МГТУ обновлены")
-		}
-		v.bmstu.Restart()
 	})
 }
 
-// ApplyBmstuOvpn передаёт новый .ovpn МГТУ на проверку подключением. false — VPN не запущен.
+// ApplyBmstuOvpn передаёт новый .ovpn МГТУ на проверку подключением. false — VPN МГТУ не включён.
 func (v *VPN) ApplyBmstuOvpn(text string) bool {
-	if !v.Active() {
+	if !v.CorpOn() {
 		return false
 	}
 	v.bmstu.ApplyOvpn(text)
 	return true
 }
 
-// Shutdown — остановить всё и дождаться (выход из приложения).
+// Shutdown — остановить всё и дождаться (выход из приложения). Флаги частей сохраняются.
 func (v *VPN) Shutdown() {
 	done := make(chan struct{})
 	v.post(func() {
 		if v.inst != nil || v.watching != nil {
-			v.stopEverything()
+			v.stopEverything(false)
 		}
 		close(done)
 	})
@@ -202,8 +266,9 @@ func (v *VPN) Shutdown() {
 func (v *VPN) MeasureDelay() (int64, error) {
 	v.mu.Lock()
 	inst := v.inst
+	main := v.status.State == StateConnected || v.status.State == StateConnecting
 	v.mu.Unlock()
-	if inst == nil {
+	if inst == nil || !main {
 		return 0, errors.New("VPN не подключён.")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -224,39 +289,84 @@ func (v *VPN) MeasureDelay() (int64, error) {
 // Preflight — проверка перед подключением, зависящая от системы (wintun.dll на Windows).
 var Preflight func() error
 
-func (v *VPN) startInternal() {
-	if v.inst != nil {
-		v.setState(StateConnected, v.Status().Message)
+// apply приводит ядро в соответствие с включёнными частями: обе выключены — всё останавливается,
+// иначе конфиг Xray пересобирается (основной сервер — если включён основной, bmstu.ru — если МГТУ).
+func (v *VPN) apply() {
+	corp := v.store.BmstuEnabled()
+	if !v.mainOn && !corp {
+		v.stopEverything(true)
 		return
 	}
-	if Preflight != nil {
+	if v.inst == nil && Preflight != nil {
 		if err := Preflight(); err != nil {
-			v.setState(StateError, err.Error())
+			v.fail(err)
 			return
 		}
 	}
-	url := v.store.ActiveURL()
-	if url == "" {
-		v.setState(StateError, "Сервер не выбран. Добавьте ссылку vless://, hysteria2:// или подписку.")
-		return
+	if v.mainOn {
+		if v.store.ActiveURL() == "" {
+			v.fail(errors.New("Сервер не выбран. Добавьте ссылку vless://, hysteria2:// или подписку."))
+			return
+		}
+		if !v.MainActive() || v.appliedLinkMissing() {
+			v.setState(StateConnecting, "Подключение…")
+		}
 	}
-	v.setState(StateConnecting, "Подключение…")
-	if err := v.startCore(url); err != nil {
-		logf("start failed: %v", err)
-		v.stopEverything()
-		v.setState(StateError, err.Error())
+	if err := v.startCore(v.store.ActiveURL()); err != nil {
+		v.fail(err)
 		return
 	}
 	v.watchNetwork()
-	v.setState(StateConnected, "Подключено")
-	v.checkConnection()
+	if v.mainOn {
+		if st := v.Status(); st.State != StateConnected {
+			v.setState(StateConnected, "Подключено")
+			v.checkConnection()
+		} else {
+			v.notify()
+		}
+	} else if v.Status().State != StateError {
+		v.setState(StateStopped, "Отключено")
+	} else {
+		v.notify()
+	}
 	v.bmstu.Sync()
+}
+
+// appliedLinkMissing — в работающем ядре нет основного сервера (было включено только МГТУ).
+func (v *VPN) appliedLinkMissing() bool {
+	v.diagMu.Lock()
+	defer v.diagMu.Unlock()
+	return v.diagLink == nil
+}
+
+// fail — ошибка запуска. Если не поднялся основной VPN, а МГТУ включён, МГТУ продолжает работать один.
+func (v *VPN) fail(err error) {
+	logf("start failed: %v", err)
+	main := v.mainOn
+	if main && v.store.BmstuEnabled() {
+		v.mainOn = false
+		if err2 := v.startCore(""); err2 == nil {
+			v.watchNetwork()
+			v.setState(StateError, err.Error())
+			v.bmstu.Sync()
+			return
+		} else {
+			logf("BMSTU-only fallback failed: %v", err2)
+		}
+	}
+	v.stopEverything(true)
+	if main {
+		v.setState(StateError, err.Error())
+	} else {
+		v.bmstu.reportError(err.Error())
+		v.notify()
+	}
 }
 
 func (v *VPN) applyKeyInternal(url string) {
 	previous := v.store.ActiveURL()
-	wasRunning := v.inst != nil
-	if !wasRunning {
+	// Основной VPN выключен: новый сервер просто запоминается
+	if v.inst == nil || !v.mainOn {
 		v.store.SetActiveURL(url)
 		return
 	}
@@ -272,8 +382,7 @@ func (v *VPN) applyKeyInternal(url string) {
 				logf("rollback failed: %v", err2)
 			}
 		}
-		v.stopEverything()
-		v.setState(StateError, msg)
+		v.fail(errors.New(msg))
 		return
 	}
 	// Ключ сохраняется только после успешного запуска
@@ -285,12 +394,12 @@ func (v *VPN) applyKeyInternal(url string) {
 
 func (v *VPN) restartCore(okMessage string) {
 	if err := v.startCore(v.store.ActiveURL()); err != nil {
-		logf("restart failed: %v", err)
-		v.stopEverything()
-		v.setState(StateError, err.Error())
+		v.fail(err)
 		return
 	}
-	v.setState(StateConnected, okMessage)
+	if v.mainOn {
+		v.setState(StateConnected, okMessage)
+	}
 }
 
 func (v *VPN) tunOptions() core.TunOptions {
@@ -312,20 +421,28 @@ func (v *VPN) tunOptions() core.TunOptions {
 }
 
 // startCore — разбор ключа, разрешение имени сервера, сборка конфига и (пере)запуск ядра.
+// Сервер url — только если включён основной VPN; маршрут bmstu.ru — если включён VPN МГТУ.
 func (v *VPN) startCore(url string) error {
-	link, err := core.ParseLink(url)
-	if err != nil {
-		return err
+	var link *core.ProxyLink
+	if v.mainOn {
+		l, err := core.ParseLink(url)
+		if err != nil {
+			return err
+		}
+		link = l
 	}
 	up, err := netenv.Refresh()
 	if err != nil {
 		return fmt.Errorf("Нет подключения к сети: %v", err)
 	}
-	serverIP, method, err := netenv.ResolveServer(context.Background(), link.Server)
-	if err != nil {
-		return err
+	var serverIP, method string
+	if link != nil {
+		serverIP, method, err = netenv.ResolveServer(context.Background(), link.Server)
+		if err != nil {
+			return err
+		}
+		logf("server %s -> %s (%s)", link.Server, serverIP, method)
 	}
-	logf("server %s -> %s (%s)", link.Server, serverIP, method)
 	var route *core.BmstuRoute
 	if v.store.BmstuEnabled() {
 		p, err := v.bmstu.EnsureProxy()
@@ -352,7 +469,11 @@ func (v *VPN) startCore(url string) error {
 	v.diagMu.Lock()
 	v.diagLink, v.diagIP, v.diagMethod = link, serverIP, method
 	v.diagMu.Unlock()
-	logf("Xray started: %s via %s, uplink %s, local DNS %q", link.Describe(), serverIP, up.Name, up.DNS)
+	if link != nil {
+		logf("Xray started: %s via %s, uplink %s, local DNS %q", link.Describe(), serverIP, up.Name, up.DNS)
+	} else {
+		logf("Xray started: only BMSTU VPN, uplink %s, local DNS %q", up.Name, up.DNS)
+	}
 	saveConfigDump(v.dataDir, config)
 	return nil
 }
@@ -370,12 +491,23 @@ func (v *VPN) stopCore() {
 	resetDialerControllers()
 }
 
-func (v *VPN) stopEverything() {
+// stopEverything останавливает ядро и туннель МГТУ. resetFlags — выключить обе части (иначе флаг МГТУ
+// сохраняется для следующего запуска: выход из приложения).
+func (v *VPN) stopEverything(resetFlags bool) {
+	v.mainOn = false
+	if resetFlags {
+		v.store.SetBmstuEnabled(false)
+	}
 	v.bmstu.StopAll()
 	v.stopCore()
 	v.unwatchNetwork()
+	v.diagMu.Lock()
+	v.diagLink = nil
+	v.diagMu.Unlock()
 	if v.Status().State != StateError {
 		v.setState(StateStopped, "Отключено")
+	} else {
+		v.notify()
 	}
 }
 

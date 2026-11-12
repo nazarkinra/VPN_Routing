@@ -524,3 +524,47 @@ func TestDumpHidesSecrets(t *testing.T) {
 		t.Error("адрес сервера должен остаться")
 	}
 }
+
+// Только МГТУ: основного сервера нет, bmstu.ru — в туннель, остальное и DNS — напрямую.
+func TestCorpOnlyConfig(t *testing.T) {
+	s, err := BuildConfig(nil, "", "195.19.33.202", []string{"example.org"}, AllBuiltins(),
+		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, testTun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal([]byte(s), &m)
+	outs := get(m, "outbounds").([]any)
+	if tag := outs[0].(map[string]any)["tag"]; tag != "direct" {
+		t.Fatalf("маршрут по умолчанию %v, нужен direct", tag)
+	}
+	for _, o := range outs {
+		if o.(map[string]any)["tag"] == "proxy" {
+			t.Fatal("выхода proxy быть не должно")
+		}
+	}
+	if !strings.Contains(s, `"outboundTag": "bmstu"`) {
+		t.Fatal("нет маршрута bmstu.ru в туннель МГТУ")
+	}
+	servers := get(m, "dns", "servers").([]any)
+	want := []string{"195.19.33.202", "tcp+local://77.88.8.8", "https+local://1.1.1.1/dns-query"}
+	if len(servers) != len(want) {
+		t.Fatalf("серверов DNS %d", len(servers))
+	}
+	for i, w := range want {
+		srv := servers[i].(map[string]any)
+		if srv["address"] != w || srv["domains"] != nil {
+			t.Errorf("DNS %d: %v", i, srv)
+		}
+	}
+	// QUIC к остальным сайтам не блокируется: без основного VPN он идёт напрямую
+	n := 0
+	for _, r := range get(m, "routing", "rules").([]any) {
+		if r.(map[string]any)["outboundTag"] == "block" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("правил block %d, нужно одно (QUIC к МГТУ)", n)
+	}
+}

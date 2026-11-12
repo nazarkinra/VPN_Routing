@@ -55,8 +55,9 @@ public class VpnTileService extends TileService implements RoutingVpnService.Lis
     @Override
     public void onClick() {
         RoutingVpnService.State s = RoutingVpnService.getState();
+        // Плитка — основной VPN, как кнопка на вкладке VPN (VPN МГТУ не трогается)
         if (s == RoutingVpnService.State.CONNECTED || s == RoutingVpnService.State.CONNECTING) {
-            RoutingVpnService.send(this, RoutingVpnService.ACTION_STOP);
+            RoutingVpnService.send(this, RoutingVpnService.ACTION_STOP_MAIN);
             return;
         }
         if (new Settings(this).getLink() == null) {

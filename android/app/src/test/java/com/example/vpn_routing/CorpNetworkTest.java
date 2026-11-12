@@ -122,4 +122,32 @@ public class CorpNetworkTest {
         assertFalse(masked.contains("u-secret"));
         assertTrue(masked.contains("203.0.113.10"));
     }
+
+    /** Только МГТУ: основного сервера нет, bmstu.ru — в туннель, остальное и DNS — напрямую. */
+    @Test
+    public void corpOnlyConfig() throws Exception {
+        JSONObject c = new JSONObject(XrayConfig.build(null, null, "195.19.33.202",
+                Collections.singletonList("example.org"), new XrayConfig.BmstuRoute(1080, "u", "p")));
+        JSONArray outs = c.getJSONArray("outbounds");
+        assertEquals("маршрут по умолчанию", "direct", outs.getJSONObject(0).getString("tag"));
+        for (int i = 0; i < outs.length(); i++) {
+            assertFalse("выхода proxy быть не должно", "proxy".equals(outs.getJSONObject(i).getString("tag")));
+        }
+        String[] want = {"195.19.33.202", "tcp+local://77.88.8.8", "https+local://1.1.1.1/dns-query"};
+        JSONArray servers = c.getJSONObject("dns").getJSONArray("servers");
+        assertEquals(want.length, servers.length());
+        for (int i = 0; i < want.length; i++) {
+            assertEquals(want[i], servers.getJSONObject(i).getString("address"));
+            assertFalse("DNS для всех доменов", servers.getJSONObject(i).has("domains"));
+        }
+        JSONArray rules = c.getJSONObject("routing").getJSONArray("rules");
+        int bmstu = 0, block = 0;
+        for (int i = 0; i < rules.length(); i++) {
+            String tag = rules.getJSONObject(i).getString("outboundTag");
+            if (tag.equals("bmstu")) bmstu++;
+            if (tag.equals("block")) block++;
+        }
+        assertEquals("маршрут bmstu.ru в туннель", 1, bmstu);
+        assertEquals("блокируется только QUIC к МГТУ", 1, block);
+    }
 }

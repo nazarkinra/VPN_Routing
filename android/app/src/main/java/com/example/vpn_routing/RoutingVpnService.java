@@ -36,14 +36,22 @@ public class RoutingVpnService extends VpnService {
 
     private static final String TAG = "RoutingVpn";
 
+    /** Включить основной VPN (VPN МГТУ, если работает, не трогается). */
     public static final String ACTION_START = "com.example.vpn_routing.START";
+    /** Выключить всё: и основной VPN, и VPN МГТУ (уведомление, «Отключить»). */
     public static final String ACTION_STOP = "com.example.vpn_routing.STOP";
+    /** Выключить основной VPN (VPN МГТУ, если включён, продолжает работать). */
+    public static final String ACTION_STOP_MAIN = "com.example.vpn_routing.STOP_MAIN";
+    /** Включить VPN МГТУ (основной VPN не трогается). */
+    public static final String ACTION_START_CORP = "com.example.vpn_routing.START_CORP";
+    /** Выключить VPN МГТУ (основной VPN не трогается). */
+    public static final String ACTION_STOP_CORP = "com.example.vpn_routing.STOP_CORP";
     /** Пересобрать конфиг (после изменения исключений), туннель не закрывается. */
     public static final String ACTION_RELOAD = "com.example.vpn_routing.RELOAD";
     /** Применить новый ключ: при ошибке вернуть прежний (как update-vpn с восстановлением снимка). */
     public static final String ACTION_APPLY_KEY = "com.example.vpn_routing.APPLY_KEY";
     public static final String EXTRA_URL = "url";
-    /** Изменились настройки VPN МГТУ (включён, логин, пароль): обновить маршруты и переподключить туннель. */
+    /** Изменились логин, пароль или файл МГТУ: переподключить туннель, если он включён. */
     public static final String ACTION_BMSTU_SYNC = "com.example.vpn_routing.BMSTU_SYNC";
     /** Новый .ovpn МГТУ: проверить подключением, при ошибке вернуть прежний. */
     public static final String ACTION_BMSTU_OVPN = "com.example.vpn_routing.BMSTU_OVPN";
@@ -58,6 +66,7 @@ public class RoutingVpnService extends VpnService {
     private static final String CHANNEL_ID = "vpn";
     private static final int NOTIFICATION_ID = 1;
 
+    /** Состояние основного VPN. У VPN МГТУ своё состояние — BmstuManager.getState() и isCorpOn(). */
     public enum State { STOPPED, CONNECTING, CONNECTED, ERROR }
 
     public interface Listener {
@@ -70,6 +79,13 @@ public class RoutingVpnService extends VpnService {
     private static volatile String message = "";
     private static volatile RoutingVpnService instance;
     private static boolean coreEnvReady;
+    /**
+     * Включённые части. Служба работает, пока включена хотя бы одна; обе живут в одном ядре Xray:
+     * основной — выход на сервер, МГТУ — маршрут bmstu.ru в туннель университета. Флаг МГТУ хранится
+     * в настройках (isBmstuEnabled), основного — тоже (для перезапуска службы системой).
+     */
+    private static volatile boolean mainOn;
+    private static volatile boolean corpOn;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private ParcelFileDescriptor tun;
@@ -82,21 +98,30 @@ public class RoutingVpnService extends VpnService {
     private String appliedDns;
     private volatile Network lastNetwork;
     private BmstuManager bmstu;
-    /** В действующем конфиге Xray есть маршрут bmstu.ru в туннель МГТУ. */
-    private boolean appliedBmstuRoute;
-    /** Сервер запущенного ядра — для диагностики, если он не отвечает. */
+    /** Сервер запущенного ядра — для диагностики, если он не отвечает (null — основной выключен). */
     private volatile ProxyLink appliedLink;
     private volatile String appliedServerIp;
     private volatile String appliedResolveMethod;
 
     // ---------- Состояние для интерфейса ----------
 
+    /** Состояние основного VPN. */
     public static State getState() {
         return state;
     }
 
     public static String getMessage() {
         return message;
+    }
+
+    /** Основной VPN подключён или подключается. */
+    public static boolean isMainActive() {
+        return state == State.CONNECTED || state == State.CONNECTING;
+    }
+
+    /** VPN МГТУ включён (туннель подключён, подключается или ждёт повтора). */
+    public static boolean isCorpOn() {
+        return corpOn;
     }
 
     public static void addListener(Listener l) {
@@ -131,16 +156,21 @@ public class RoutingVpnService extends VpnService {
         state = newState;
         message = newMessage == null ? "" : newMessage;
         Log.i(TAG, newState + ": " + message);
-        if (changed) VpnTileService.refresh(this);
+        notifyListeners(changed);
+    }
+
+    /** Сообщить интерфейсу, плитке и уведомлению (в том числе о включении и выключении МГТУ). */
+    private void notifyListeners(boolean tile) {
+        if (tile) VpnTileService.refresh(this);
         mainHandler.post(() -> {
             for (Listener l : listeners) l.onStateChanged(state, message);
-            if (state == State.CONNECTING || state == State.CONNECTED) updateNotification();
+            if (core != null) updateNotification();
         });
     }
 
     public static void send(Context context, String action) {
         Intent intent = new Intent(context, RoutingVpnService.class).setAction(action);
-        if (ACTION_START.equals(action) || ACTION_APPLY_KEY.equals(action)) {
+        if (ACTION_START.equals(action) || ACTION_START_CORP.equals(action) || ACTION_APPLY_KEY.equals(action)) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent);
             else context.startService(intent);
         } else if (instance != null) {
@@ -148,9 +178,9 @@ public class RoutingVpnService extends VpnService {
         }
     }
 
-    /** Передать службе новый .ovpn МГТУ. Возвращает false, если VPN не запущен. */
+    /** Передать службе новый .ovpn МГТУ. Возвращает false, если VPN МГТУ не включён. */
     public static boolean applyBmstuOvpn(Context context, String text) {
-        if (instance == null) return false;
+        if (instance == null || !corpOn) return false;
         context.startService(new Intent(context, RoutingVpnService.class)
                 .setAction(ACTION_BMSTU_OVPN).putExtra(EXTRA_OVPN, text));
         return true;
@@ -167,7 +197,9 @@ public class RoutingVpnService extends VpnService {
     public static long measureDelay() throws Exception {
         RoutingVpnService service = instance;
         CoreController controller = service == null ? null : service.core;
-        if (controller == null || !controller.getIsRunning()) throw new IllegalStateException("VPN не подключён.");
+        if (controller == null || !controller.getIsRunning() || !mainOn) {
+            throw new IllegalStateException("VPN не подключён.");
+        }
         try {
             lastDelay = controller.measureDelay(DELAY_TEST_URL);
         } catch (Exception e) {
@@ -195,15 +227,42 @@ public class RoutingVpnService extends VpnService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
-        // null — перезапуск системой, SERVICE_INTERFACE — запуск «Постоянной VPN» (always-on)
-        if (action == null || SERVICE_INTERFACE.equals(action)) action = ACTION_START;
 
         if (ACTION_STOP.equals(action)) {
-            worker.execute(this::stopEverything);
+            worker.execute(() -> stopEverything(true));
             return START_NOT_STICKY;
         }
+        if (ACTION_STOP_MAIN.equals(action)) {
+            worker.execute(() -> {
+                mainOn = false;
+                apply();
+            });
+            return START_STICKY;
+        }
+        if (ACTION_STOP_CORP.equals(action)) {
+            worker.execute(() -> {
+                settings.setBmstuEnabled(false);
+                apply();
+            });
+            return START_STICKY;
+        }
         startForeground(NOTIFICATION_ID, buildNotification());
-        if (ACTION_APPLY_KEY.equals(action)) {
+        if (action == null || SERVICE_INTERFACE.equals(action)) {
+            // null — перезапуск системой: включить части, как были. SERVICE_INTERFACE — «Постоянная VPN»
+            // (always-on): основной VPN и МГТУ, если он был включён
+            boolean main = action != null || settings.wasMainOn();
+            worker.execute(() -> {
+                mainOn = main;
+                apply();
+            });
+        } else if (ACTION_START_CORP.equals(action)) {
+            worker.execute(() -> {
+                // Всё было выключено: включается только МГТУ
+                if (core == null) mainOn = false;
+                settings.setBmstuEnabled(true);
+                apply();
+            });
+        } else if (ACTION_APPLY_KEY.equals(action)) {
             String url = intent.getStringExtra(EXTRA_URL);
             worker.execute(() -> applyKeyInternal(url));
         } else if (ACTION_RELOAD.equals(action)) {
@@ -212,16 +271,18 @@ public class RoutingVpnService extends VpnService {
             });
         } else if (ACTION_BMSTU_SYNC.equals(action)) {
             worker.execute(() -> {
-                if (core == null) return;
-                // Маршрут bmstu.ru добавляется в Xray или убирается из него только при включении и выключении
-                if (appliedBmstuRoute != settings.isBmstuEnabled()) restartCore("Маршруты МГТУ обновлены");
-                bmstu.restart();
+                if (core != null && settings.isBmstuEnabled()) bmstu.restart();
             });
         } else if (ACTION_BMSTU_OVPN.equals(action)) {
             String text = intent.getStringExtra(EXTRA_OVPN);
             if (text != null) bmstu.applyOvpn(text);
         } else {
-            worker.execute(this::startInternal);
+            worker.execute(() -> {
+                // Всё было выключено: включается только основной (флаг МГТУ мог остаться от прошлого раза)
+                if (core == null) settings.setBmstuEnabled(false);
+                mainOn = true;
+                apply();
+            });
         }
         return START_STICKY;
     }
@@ -229,12 +290,12 @@ public class RoutingVpnService extends VpnService {
     @Override
     public void onRevoke() {
         // Пользователь включил другой VPN или отозвал разрешение
-        worker.execute(this::stopEverything);
+        worker.execute(() -> stopEverything(true));
     }
 
     @Override
     public void onDestroy() {
-        worker.execute(this::stopEverything);
+        worker.execute(() -> stopEverything(false));
         worker.shutdown();
         bmstu.shutdown();
         if (instance == this) {
@@ -246,30 +307,68 @@ public class RoutingVpnService extends VpnService {
 
     // ---------- Работа в фоновом потоке ----------
 
-    private void startInternal() {
-        if (core != null && core.getIsRunning()) {
-            setState(State.CONNECTED, message);
+    /**
+     * Привести ядро в соответствие с включёнными частями: обе выключены — всё останавливается, иначе
+     * конфиг Xray пересобирается (выход на сервер — если включён основной, bmstu.ru — если МГТУ).
+     */
+    private void apply() {
+        boolean corp = settings.isBmstuEnabled();
+        settings.setMainOn(mainOn);
+        if (!mainOn && !corp) {
+            stopEverything(true);
             return;
         }
-        setState(State.CONNECTING, "Подключение…");
+        if (mainOn && (!isMainActive() || appliedLink == null)) setState(State.CONNECTING, "Подключение…");
         watchNetwork();
         try {
             startCore(settings.getVlessUrl());
+        } catch (Exception e) {
+            fail(e, errorText(e));
+            return;
+        }
+        corpOn = corp;
+        if (mainOn && state != State.CONNECTED) {
             setState(State.CONNECTED, "Подключено");
             checkConnection();
-            bmstu.sync();
-        } catch (Exception e) {
-            Log.e(TAG, "start failed", e);
-            stopEverything();
-            setState(State.ERROR, errorText(e));
+        } else if (!mainOn && state != State.ERROR) {
+            setState(State.STOPPED, "Отключено");
+        } else {
+            notifyListeners(false);
         }
+        bmstu.sync();
+    }
+
+    /** Ошибка запуска. Если не поднялся основной VPN, а МГТУ включён, МГТУ продолжает работать один. */
+    private void fail(Exception e, String text) {
+        Log.e(TAG, "start failed", e);
+        boolean main = mainOn;
+        if (main && settings.isBmstuEnabled()) {
+            mainOn = false;
+            settings.setMainOn(false);
+            try {
+                startCore(null);
+                corpOn = true;
+                setState(State.ERROR, text);
+                bmstu.sync();
+                return;
+            } catch (Exception e2) {
+                Log.e(TAG, "BMSTU-only fallback failed", e2);
+            }
+        }
+        stopEverything(true);
+        if (main) setState(State.ERROR, text);
+        else bmstu.reportError(text);
     }
 
     private void applyKeyInternal(String url) {
         String previous = settings.getVlessUrl();
-        boolean wasRunning = core != null;
+        // Основной VPN выключен: новый сервер просто запоминается
+        if (core == null || !mainOn) {
+            settings.setVlessUrl(url);
+            notifyListeners(false);
+            return;
+        }
         setState(State.CONNECTING, "Применение ключа…");
-        watchNetwork();
         try {
             startCore(url);
             // Ключ сохраняется только после успешного запуска
@@ -280,7 +379,7 @@ public class RoutingVpnService extends VpnService {
         } catch (Exception e) {
             Log.e(TAG, "new key failed", e);
             String error = "Ключ не применён: " + errorText(e);
-            if (wasRunning && !previous.isEmpty()) {
+            if (!previous.isEmpty()) {
                 try {
                     startCore(previous);
                     setState(State.CONNECTED, error + " Работает прежний ключ.");
@@ -289,28 +388,33 @@ public class RoutingVpnService extends VpnService {
                     Log.e(TAG, "rollback failed", e2);
                 }
             }
-            stopEverything();
-            setState(State.ERROR, error);
+            fail(e, error);
         }
     }
 
     private void restartCore(String okMessage) {
         try {
             startCore(settings.getVlessUrl());
-            setState(State.CONNECTED, okMessage);
+            if (mainOn) setState(State.CONNECTED, okMessage);
         } catch (Exception e) {
-            Log.e(TAG, "restart failed", e);
-            stopEverything();
-            setState(State.ERROR, errorText(e));
+            fail(e, errorText(e));
         }
     }
 
-    /** Разбор ключа, разрешение имени сервера, сборка конфига и (пере)запуск ядра. */
+    /**
+     * Разбор ключа, разрешение имени сервера, сборка конфига и (пере)запуск ядра.
+     * Сервер url — только если включён основной VPN; маршрут bmstu.ru — если включён VPN МГТУ.
+     */
     private void startCore(String url) throws Exception {
-        ProxyLink link = ProxyLink.parse(url);
-        ServerResolver.Result resolved = ServerResolver.resolve(link.server, physicalNetwork());
-        String serverIp = resolved.ip;
-        Log.i(TAG, "server " + link.server + " -> " + serverIp + " (" + resolved.method + ")");
+        ProxyLink link = null;
+        String serverIp = null;
+        ServerResolver.Result resolved = null;
+        if (mainOn) {
+            link = ProxyLink.parse(url);
+            resolved = ServerResolver.resolve(link.server, physicalNetwork());
+            serverIp = resolved.ip;
+            Log.i(TAG, "server " + link.server + " -> " + serverIp + " (" + resolved.method + ")");
+        }
         String dns = networkDns != null ? networkDns : detectDns(connectivity.getActiveNetwork());
         XrayConfig.BmstuRoute route = null;
         if (settings.isBmstuEnabled()) {
@@ -328,11 +432,11 @@ public class RoutingVpnService extends VpnService {
         controller.startLoop(config, tun.getFd());
         core = controller;
         appliedDns = dns;
-        appliedBmstuRoute = route != null;
         appliedLink = link;
         appliedServerIp = serverIp;
-        appliedResolveMethod = resolved.method;
-        Log.i(TAG, "Xray started: " + link.describe() + " via " + serverIp + ", local DNS " + dns);
+        appliedResolveMethod = resolved == null ? null : resolved.method;
+        Log.i(TAG, "Xray started: " + (link == null ? "без основного VPN" : link.describe() + " via " + serverIp)
+                + (route != null ? ", BMSTU" : "") + ", local DNS " + dns);
         ConfigDump.save(this, config);
     }
 
@@ -396,7 +500,18 @@ public class RoutingVpnService extends VpnService {
         }
     }
 
-    private void stopEverything() {
+    /**
+     * Остановить ядро, туннель МГТУ и службу. resetFlags — обе части выключены (иначе — уничтожение
+     * службы системой: флаги остаются, чтобы при перезапуске включить части, как были).
+     */
+    private void stopEverything(boolean resetFlags) {
+        mainOn = false;
+        corpOn = false;
+        if (resetFlags) {
+            settings.setMainOn(false);
+            settings.setBmstuEnabled(false);
+        }
+        appliedLink = null;
         bmstu.stopAll();
         stopCore();
         if (tun != null) {
@@ -408,6 +523,7 @@ public class RoutingVpnService extends VpnService {
         }
         unwatchNetwork();
         if (state != State.ERROR) setState(State.STOPPED, "Отключено");
+        else notifyListeners(true);
         mainHandler.post(() -> {
             stopForeground(true);
             stopSelf();
@@ -554,13 +670,20 @@ public class RoutingVpnService extends VpnService {
                 new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent stop = PendingIntent.getService(this, 1,
                 new Intent(this, RoutingVpnService.class).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE);
-        ProxyLink link = settings.getLink();
-        String title = state == State.CONNECTED ? "VPN подключён" : "Подключение VPN…";
+        // Основной VPN и VPN МГТУ — каждый своей строкой состояния
+        boolean main = mainOn || state == State.CONNECTING;
+        String title;
+        if (main && corpOn) title = state == State.CONNECTED ? "VPN и VPN МГТУ включены" : "Подключение VPN…";
+        else if (main) title = state == State.CONNECTED ? "VPN подключён" : "Подключение VPN…";
+        else if (corpOn) title = "VPN МГТУ включён";
+        else title = "Подключение…";
+        ProxyLink link = main ? settings.getLink() : null;
+        String text = link != null ? link.server : corpOn ? "bmstu.ru — через сеть МГТУ" : message;
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ID) : new Notification.Builder(this);
         return b.setSmallIcon(R.drawable.ic_vpn)
                 .setContentTitle(title)
-                .setContentText(link == null ? message : link.server)
+                .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)
                 .addAction(new Notification.Action.Builder(null, "Отключить", stop).build())

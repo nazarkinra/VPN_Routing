@@ -1,23 +1,23 @@
 {
-  "versionCode": 5,
-  "versionName": "1.4",
-  "notes": "Windows: если видеодрайвер не даёт OpenGL (белое окно), окно само переходит на программную отрисовку (Mesa); журнал окна gui.log. Linux: значок приложения в панели задач GNOME вместо шестерёнки",
+  "versionCode": 6,
+  "versionName": "1.5",
+  "notes": "VPN МГТУ и основной VPN включаются независимо: у каждого своя кнопка питания (вкладки VPN и МГТУ), в трее — два отдельных пункта. МГТУ можно включить без основного VPN — остальные сайты тогда идут напрямую",
   "date": "2026-11-12",
   "files": {
     "linux-amd64": {
       "file": "VPN_routing-linux-amd64.tar.gz",
-      "size": 23344331,
-      "sha256": "b959e283999334444b46722a1b17fe4a5a6305ef2f9bcca806a01a43d1172815"
+      "size": 23366324,
+      "sha256": "1e9e89ff051684982e374651da462821fa187a144ef25561430408ca6294b308"
     },
     "windows-amd64": {
       "file": "VPN_routing-windows.zip",
-      "size": 48276227,
-      "sha256": "cbf2624b1fe2965e3af39c1d88a47d483b72e19de3f95dad6a4ef41a837da5a3"
+      "size": 48229149,
+      "sha256": "17b29484aef3925100fa9191c387199bb1725b9203c9987697c369c28ae72494"
     },
     "windows-setup": {
       "file": "VPN_routing-setup.exe",
-      "size": 49038848,
-      "sha256": "bc8058185884154edef6ed13319fdb071c45b3f76ad691f7a888e2db63d56fbd"
+      "size": 49043968,
+      "sha256": "86d0afa35c37fa3e35e9f71dd5d2cea2b29ce3d261e7be91b63ceda946f53b45"
     }
   }
 }

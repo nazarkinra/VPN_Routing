@@ -77,9 +77,11 @@ func (s *Server) routes() http.Handler {
 	}
 
 	api("/api/state", s.state)
+	// Основной VPN; disconnect выключает всё (команда vpnrouting disconnect, «Выход»)
 	api("/api/vpn/connect", s.post(func(_ *http.Request) (any, error) { s.VPN.Start(); return nil, nil }))
 	api("/api/vpn/disconnect", s.post(func(_ *http.Request) (any, error) { s.VPN.Stop(); return nil, nil }))
 	api("/api/vpn/toggle", s.post(func(_ *http.Request) (any, error) { s.VPN.Toggle(); return nil, nil }))
+	api("/api/vpn/stop-main", s.post(func(_ *http.Request) (any, error) { s.VPN.StopMain(); return nil, nil }))
 	api("/api/vpn/check", s.post(s.check))
 	api("/api/servers/select", s.post(s.selectServer))
 	api("/api/servers/add", s.post(s.addServers))
@@ -109,6 +111,16 @@ func (s *Server) routes() http.Handler {
 		return map[string]string{"config": string(b)}, nil
 	})
 	api("/api/bmstu/enabled", s.post(s.bmstuEnabled))
+	// VPN МГТУ — независимо от основного
+	api("/api/bmstu/connect", s.post(s.bmstuConnect))
+	api("/api/bmstu/disconnect", s.post(func(_ *http.Request) (any, error) { s.VPN.StopCorp(); return nil, nil }))
+	api("/api/bmstu/toggle", s.post(func(r *http.Request) (any, error) {
+		if s.VPN.CorpOn() {
+			s.VPN.StopCorp()
+			return nil, nil
+		}
+		return s.bmstuConnect(r)
+	}))
 	api("/api/bmstu/credentials", s.post(s.bmstuCredentials))
 	api("/api/bmstu/ovpn", s.post(s.bmstuOvpn))
 	api("/api/bmstu/restore", s.post(s.bmstuRestore))
@@ -214,7 +226,7 @@ func (s *Server) autostart(refresh bool) Autostart {
 
 func (s *Server) bmstuView() Bmstu {
 	v := Bmstu{
-		Enabled:        s.Store.BmstuEnabled(),
+		Enabled:        s.VPN.CorpOn(),
 		HasOvpn:        s.Store.HasBmstuOvpn(),
 		HasCredentials: s.Store.HasBmstuCredentials(),
 		User:           s.Store.BmstuUser(),

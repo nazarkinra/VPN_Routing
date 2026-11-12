@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +68,7 @@ type UI struct {
 	banner  *fyne.Container
 
 	trayStatus, trayToggle *fyne.MenuItem
+	trayCorp               *fyne.MenuItem
 	trayMenu               *fyne.Menu
 	trayState              string
 	offered                int
@@ -336,7 +338,9 @@ func (u *UI) setupTray() {
 	}
 	u.trayStatus = fyne.NewMenuItem("Не подключено", nil)
 	u.trayStatus.Disabled = true
-	u.trayToggle = fyne.NewMenuItem("Подключить", func() { u.act("/api/vpn/toggle", nil, "", nil) })
+	u.trayToggle = fyne.NewMenuItem("Подключить VPN", func() { u.act("/api/vpn/toggle", nil, "", nil) })
+	// VPN МГТУ — отдельным пунктом, независимо от основного
+	u.trayCorp = fyne.NewMenuItem("Подключить VPN МГТУ", func() { u.act("/api/bmstu/toggle", nil, "", nil) })
 	open := fyne.NewMenuItem("Открыть окно", u.Show)
 	quit := fyne.NewMenuItem("Выход", func() {
 		if u.o.OnQuit != nil {
@@ -346,7 +350,7 @@ func (u *UI) setupTray() {
 		}
 	})
 	quit.IsQuit = true
-	u.trayMenu = fyne.NewMenu("VPN routing", u.trayStatus, fyne.NewMenuItemSeparator(), u.trayToggle, open,
+	u.trayMenu = fyne.NewMenu("VPN routing", u.trayStatus, fyne.NewMenuItemSeparator(), u.trayToggle, u.trayCorp, open,
 		fyne.NewMenuItemSeparator(), quit)
 	desk.SetSystemTrayMenu(u.trayMenu)
 	desk.SetSystemTrayIcon(trayIcon("stopped"))
@@ -362,19 +366,40 @@ func (u *UI) updateTray(st *api.State) {
 		return
 	}
 	s := string(st.VPN.State)
-	if s == u.trayState {
+	corp := ""
+	if st.Bmstu.Enabled {
+		corp = "connecting"
+		if st.Bmstu.Status.State == "up" {
+			corp = "connected"
+		}
+	}
+	key := s + "/" + corp
+	if key == u.trayState {
 		return
 	}
-	u.trayState = s
-	u.trayStatus.Label = stateTitles[s]
+	u.trayState = key
+	u.trayStatus.Label = "VPN: " + strings.ToLower(stateTitles[s])
+	if corp != "" {
+		u.trayStatus.Label += " · МГТУ: " + strings.ToLower(stateTitles[corp])
+	}
 	if s == "connected" || s == "connecting" {
-		u.trayToggle.Label = "Отключить"
+		u.trayToggle.Label = "Отключить VPN"
 	} else {
-		u.trayToggle.Label = "Подключить"
+		u.trayToggle.Label = "Подключить VPN"
+	}
+	if corp != "" {
+		u.trayCorp.Label = "Отключить VPN МГТУ"
+	} else {
+		u.trayCorp.Label = "Подключить VPN МГТУ"
 	}
 	u.trayMenu.Refresh()
+	// Точка на значке: основной VPN, а если он выключен — VPN МГТУ
+	icon := s
+	if (s == "stopped" || s == "error") && corp != "" {
+		icon = corp
+	}
 	if desk, ok := u.app.(desktop.App); ok {
-		desk.SetSystemTrayIcon(trayIcon(s))
+		desk.SetSystemTrayIcon(trayIcon(icon))
 	}
 }
 

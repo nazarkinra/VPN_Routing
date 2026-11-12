@@ -216,7 +216,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleCommand(Intent intent) {
-        if (intent != null && ACTION_CONNECT.equals(intent.getAction()) && !isActive()) {
+        if (intent != null && ACTION_CONNECT.equals(intent.getAction()) && !RoutingVpnService.isMainActive()) {
             setIntent(new Intent(this, MainActivity.class)); // при повороте экрана не повторять
             toggleVpn();
         }
@@ -248,15 +248,10 @@ public class MainActivity extends AppCompatActivity {
 
     // ---------- Подключение ----------
 
-    private boolean isActive() {
-        RoutingVpnService.State s = RoutingVpnService.getState();
-        return s == RoutingVpnService.State.CONNECTED || s == RoutingVpnService.State.CONNECTING;
-    }
-
-    /** Кнопка питания на вкладке VPN. */
+    /** Кнопка питания на вкладке VPN: только основной VPN, VPN МГТУ не трогается. */
     void toggleVpn() {
-        if (isActive()) {
-            RoutingVpnService.send(this, RoutingVpnService.ACTION_STOP);
+        if (RoutingVpnService.isMainActive()) {
+            RoutingVpnService.send(this, RoutingVpnService.ACTION_STOP_MAIN);
             return;
         }
         if (settings.getLink() == null) {
@@ -264,6 +259,15 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         withVpnPermission(() -> RoutingVpnService.send(this, RoutingVpnService.ACTION_START));
+    }
+
+    /** Кнопка питания на вкладке МГТУ: только VPN МГТУ, основной VPN не трогается. */
+    void toggleCorp() {
+        if (RoutingVpnService.isCorpOn()) {
+            RoutingVpnService.send(this, RoutingVpnService.ACTION_STOP_CORP);
+            return;
+        }
+        withVpnPermission(() -> RoutingVpnService.send(this, RoutingVpnService.ACTION_START_CORP));
     }
 
     private void withVpnPermission(Runnable action) {

@@ -170,12 +170,24 @@ public final class Settings {
     private static final String KEY_BMSTU_OVPN = "bmstu_ovpn";
     private static final String KEY_BMSTU_OVPN_PREV = "bmstu_ovpn_prev";
 
+    /** VPN МГТУ включён кнопкой на вкладке МГТУ (независимо от основного VPN). */
     public boolean isBmstuEnabled() {
         return prefs.getBoolean(KEY_BMSTU_ENABLED, false);
     }
 
     public void setBmstuEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_BMSTU_ENABLED, enabled).apply();
+    }
+
+    private static final String KEY_MAIN_ON = "main_on";
+
+    /** Основной VPN был включён (для перезапуска службы системой; VPN МГТУ — isBmstuEnabled). */
+    public boolean wasMainOn() {
+        return prefs.getBoolean(KEY_MAIN_ON, true);
+    }
+
+    public void setMainOn(boolean on) {
+        prefs.edit().putBoolean(KEY_MAIN_ON, on).apply();
     }
 
     public String getBmstuUser() {

@@ -460,9 +460,9 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
 
     // ---------- Вспомогательное ----------
 
+    /** Основной VPN подключён (если выключен, сервер просто выбирается). */
     private boolean isVpnActive() {
-        RoutingVpnService.State s = RoutingVpnService.getState();
-        return s == RoutingVpnService.State.CONNECTED || s == RoutingVpnService.State.CONNECTING;
+        return RoutingVpnService.isMainActive();
     }
 
     private void openVpnSettings() {

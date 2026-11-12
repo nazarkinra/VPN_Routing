@@ -56,6 +56,7 @@ type Direct struct {
 }
 
 type Bmstu struct {
+	// Enabled — VPN МГТУ включён (кнопкой на вкладке МГТУ, независимо от основного VPN).
 	Enabled        bool            `json:"enabled"`
 	HasOvpn        bool            `json:"hasOvpn"`
 	HasCredentials bool            `json:"hasCredentials"`

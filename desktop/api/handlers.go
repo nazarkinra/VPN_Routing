@@ -34,7 +34,7 @@ func (s *Server) selectServer(r *http.Request) (any, error) {
 	if srv.URL == s.Store.ActiveURL() {
 		return nil, nil
 	}
-	if s.VPN.Active() {
+	if s.VPN.MainActive() {
 		// Служба проверит сервер запуском и при ошибке вернёт прежний
 		s.VPN.ApplyKey(srv.URL)
 		return map[string]string{"message": "Переключение на " + srv.Link().Title()}, nil
@@ -150,7 +150,7 @@ func (s *Server) subLink(r *http.Request) (any, error) {
 // ---------- Напрямую ----------
 
 func (s *Server) reloadIfConnected() {
-	if s.VPN.Status().State == app.StateConnected {
+	if s.VPN.Running() {
 		s.VPN.Reload()
 	}
 }
@@ -200,6 +200,7 @@ func (s *Server) disableBuiltin(r *http.Request) (any, error) {
 
 // ---------- МГТУ ----------
 
+// bmstuEnabled — прежняя команда переключателя: включить или выключить VPN МГТУ.
 func (s *Server) bmstuEnabled(r *http.Request) (any, error) {
 	req, err := decode[struct {
 		On bool `json:"on"`
@@ -207,8 +208,22 @@ func (s *Server) bmstuEnabled(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.Store.SetBmstuEnabled(req.On)
-	s.VPN.BmstuSync()
+	if req.On {
+		return s.bmstuConnect(r)
+	}
+	s.VPN.StopCorp()
+	return nil, nil
+}
+
+// bmstuConnect — включить VPN МГТУ (нужны файл профиля и учётные данные).
+func (s *Server) bmstuConnect(_ *http.Request) (any, error) {
+	if !s.Store.HasBmstuOvpn() {
+		return nil, errors.New("Сначала импортируйте файл профиля .ovpn от университета.")
+	}
+	if !s.Store.HasBmstuCredentials() {
+		return nil, errors.New("Сначала укажите логин и пароль МГТУ.")
+	}
+	s.VPN.StartCorp()
 	return nil, nil
 }
 
@@ -229,9 +244,6 @@ func (s *Server) bmstuCredentials(r *http.Request) (any, error) {
 	}
 	if err := s.Store.SetBmstuCredentials(user, pass); err != nil {
 		return nil, err
-	}
-	if !s.Store.BmstuEnabled() {
-		s.Store.SetBmstuEnabled(true)
 	}
 	s.VPN.BmstuSync()
 	return nil, nil
@@ -277,7 +289,7 @@ func (s *Server) setPrefs(r *http.Request) (any, error) {
 	}
 	old := s.Store.Prefs()
 	s.Store.SetPrefs(p)
-	if (old.BlockDNSLeak != p.BlockDNSLeak || old.IPv6 != p.IPv6) && s.VPN.Status().State == app.StateConnected {
+	if (old.BlockDNSLeak != p.BlockDNSLeak || old.IPv6 != p.IPv6) && s.VPN.Running() {
 		s.VPN.Reload()
 	}
 	return nil, nil

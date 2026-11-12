@@ -46,8 +46,10 @@
     <string name="bmstu_restore">Вернуть прежний</string>
     <string name="bmstu_log">Журнал</string>
     <string name="bmstu_log_empty">Журнал пуст: туннель ещё не запускался.</string>
+    <string name="bmstu_power">Включить или выключить VPN МГТУ</string>
+    <string name="bmstu_profile_label">Профиль</string>
     <string name="bmstu_copy">Копировать</string>
-    <string name="bmstu_note">Через туннель МГТУ идёт только bmstu.ru и его поддомены. Туннель работает вместе с основным VPN. Пока туннель не поднят, сайты МГТУ открываются напрямую.</string>
+    <string name="bmstu_note">Через туннель МГТУ идёт только bmstu.ru и его поддомены. VPN МГТУ и основной VPN включаются независимо: каждый своей кнопкой. Пока туннель не поднят, сайты МГТУ открываются напрямую.</string>
 
     <!-- Напрямую -->
     <string name="action_search">Поиск</string>

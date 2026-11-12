@@ -28,7 +28,8 @@ public class CommandActivity extends Activity {
         if (ACTION_TOGGLE.equals(action)) action = isActive() ? ACTION_DISCONNECT : ACTION_CONNECT;
 
         if (ACTION_DISCONNECT.equals(action)) {
-            if (isActive()) {
+            // Выключается всё, в том числе VPN МГТУ
+            if (isActive() || RoutingVpnService.isCorpOn()) {
                 RoutingVpnService.send(this, RoutingVpnService.ACTION_STOP);
                 toast("VPN выключается");
             } else {

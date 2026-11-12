@@ -23,7 +23,7 @@ import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.appbar.MaterialToolbar;
-import com.google.android.material.switchmaterial.SwitchMaterial;
+import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
@@ -32,15 +32,20 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
-/** Вкладка корпоративного VPN МГТУ: профиль с переключателем, статистика, учётные данные, файл, журнал. */
+/**
+ * Вкладка корпоративного VPN МГТУ: кнопка питания (как на вкладке VPN, но включает только туннель
+ * университета, независимо от основного VPN), профиль, статистика, учётные данные, файл, журнал.
+ */
 public class CorpFragment extends Fragment implements BmstuManager.Listener, RoutingVpnService.Listener {
 
     private Settings settings;
     private final Handler ticker = new Handler(Looper.getMainLooper());
 
-    private SwitchMaterial profileSwitch;
+    private View powerHalo;
+    private MaterialCardView powerButton;
+    private android.widget.ImageView powerIcon;
+    private android.animation.ObjectAnimator pulse;
     private TextView profileServer;
-    private View statusDot;
     private TextView statusText;
     private TextView statusDetail;
     private View statsSection;
@@ -52,7 +57,6 @@ public class CorpFragment extends Fragment implements BmstuManager.Listener, Rou
     private MaterialToolbar toolbar;
 
     private long lastIn = -1, lastOut = -1;
-    private boolean bindingSwitch;
 
     private final ActivityResultLauncher<String[]> pickOvpn = registerForActivityResult(
             new ActivityResultContracts.OpenDocument(), uri -> {
@@ -82,9 +86,11 @@ public class CorpFragment extends Fragment implements BmstuManager.Listener, Rou
             return true;
         });
 
-        profileSwitch = v.findViewById(R.id.profileSwitch);
+        powerHalo = v.findViewById(R.id.powerHalo);
+        powerButton = v.findViewById(R.id.powerButton);
+        powerIcon = v.findViewById(R.id.powerIcon);
+        powerButton.setOnClickListener(x -> togglePower());
         profileServer = v.findViewById(R.id.profileServer);
-        statusDot = v.findViewById(R.id.statusDot);
         statusText = v.findViewById(R.id.statusText);
         statusDetail = v.findViewById(R.id.statusDetail);
         statsSection = v.findViewById(R.id.statsSection);
@@ -101,10 +107,6 @@ public class CorpFragment extends Fragment implements BmstuManager.Listener, Rou
         fileRestore = v.findViewById(R.id.fileRestore);
         logText = v.findViewById(R.id.logText);
 
-        profileSwitch.setOnCheckedChangeListener((b, checked) -> {
-            if (!bindingSwitch) setEnabled(checked);
-        });
-        v.findViewById(R.id.profileCard).setOnClickListener(x -> profileSwitch.toggle());
         v.findViewById(R.id.credEdit).setOnClickListener(x -> editCredentials());
         v.findViewById(R.id.fileImport).setOnClickListener(x -> pickOvpn.launch(new String[]{"*/*"}));
         fileRestore.setOnClickListener(x -> restoreOvpn());
@@ -149,60 +151,115 @@ public class CorpFragment extends Fragment implements BmstuManager.Listener, Rou
         if (isAdded()) render();
     }
 
-    private boolean vpnActive() {
-        RoutingVpnService.State s = RoutingVpnService.getState();
-        return s == RoutingVpnService.State.CONNECTED || s == RoutingVpnService.State.CONNECTING;
-    }
+    private enum Power { OFF, CONNECTING, ON, ERROR }
 
     private void render() {
-        bindingSwitch = true;
-        profileSwitch.setChecked(settings.isBmstuEnabled());
-        bindingSwitch = false;
-
+        // Состояние только VPN МГТУ: основной VPN на эту кнопку не влияет
+        boolean on = RoutingVpnService.isCorpOn();
         BmstuManager.State state = BmstuManager.getState();
+        Power power;
         String title;
         String detail;
-        int color;
-        if (!settings.isBmstuEnabled()) {
-            title = "Отключено";
-            detail = "Включите, чтобы сайты МГТУ шли через корпоративную сеть";
-            color = R.color.status_idle;
-        } else if (!settings.hasBmstuOvpn()) {
-            title = "Нужен файл профиля";
-            detail = "Импортируйте .ovpn от университета в разделе «Файл профиля»";
-            color = R.color.status_wait;
-        } else if (!settings.hasBmstuCredentials()) {
-            title = "Нужны логин и пароль";
-            detail = "Укажите их в разделе «Учётные данные»";
-            color = R.color.status_wait;
-        } else if (!vpnActive()) {
-            title = "Ожидает основной VPN";
-            detail = "Подключится вместе с основным VPN на вкладке VPN";
-            color = R.color.status_idle;
-        } else if (state == BmstuManager.State.UP) {
-            title = "Подключено";
+        if (on && state == BmstuManager.State.UP) {
+            power = Power.ON;
+            title = getString(R.string.status_connected);
             detail = "bmstu.ru идёт через сеть МГТУ";
-            color = R.color.status_ok;
-        } else if (state == BmstuManager.State.CONNECTING) {
-            title = "Подключение…";
-            detail = "Рукопожатие с сервером OpenVPN";
-            color = R.color.status_wait;
-        } else if (state == BmstuManager.State.WAITING) {
+        } else if (on && state == BmstuManager.State.WAITING) {
+            power = Power.CONNECTING;
             title = "Нет соединения";
             detail = currentMessage();
-            color = R.color.status_error;
-        } else {
-            title = "Отключено";
+        } else if (on) {
+            power = Power.CONNECTING;
+            title = getString(R.string.status_connecting);
+            detail = "Рукопожатие с сервером OpenVPN";
+        } else if (state == BmstuManager.State.ERROR) {
+            power = Power.ERROR;
+            title = getString(R.string.status_error);
             detail = currentMessage();
-            color = R.color.status_idle;
+        } else {
+            power = Power.OFF;
+            title = getString(R.string.status_stopped);
+            detail = !settings.hasBmstuOvpn() ? "Сначала импортируйте .ovpn от университета"
+                    : !settings.hasBmstuCredentials() ? "Сначала укажите логин и пароль"
+                    : getString(R.string.tap_to_connect);
         }
         statusText.setText(title);
         statusDetail.setText(detail);
-        statusDot.setBackgroundTintList(ColorStateList.valueOf(ContextCompat.getColor(requireContext(), color)));
-        statsSection.setVisibility(state == BmstuManager.State.UP && vpnActive() ? View.VISIBLE : View.GONE);
+        statusDetail.setTextColor(ContextCompat.getColor(requireContext(),
+                power == Power.ERROR || state == BmstuManager.State.WAITING && on
+                        ? R.color.status_error : R.color.text_secondary));
+        paintPower(power);
+
+        statsSection.setVisibility(on && state == BmstuManager.State.UP ? View.VISIBLE : View.GONE);
         updateStats();
         String log = BmstuManager.getLog();
         logText.setText(log.isEmpty() ? getString(R.string.bmstu_log_empty) : log);
+    }
+
+    /** Кнопка питания — те же цвета, что на вкладке VPN. */
+    private void paintPower(Power power) {
+        Context c = requireContext();
+        int core, icon, haloColor;
+        float haloAlpha;
+        switch (power) {
+            case ON:
+            case CONNECTING:
+                core = ContextCompat.getColor(c, power == Power.ON ? R.color.status_ok : R.color.status_wait);
+                icon = ContextCompat.getColor(c, R.color.white);
+                haloColor = core;
+                haloAlpha = 0.18f;
+                break;
+            case ERROR:
+                core = ContextCompat.getColor(c, R.color.surface);
+                icon = ContextCompat.getColor(c, R.color.status_error);
+                haloColor = ContextCompat.getColor(c, R.color.status_error);
+                haloAlpha = 0.14f;
+                break;
+            default:
+                core = ContextCompat.getColor(c, R.color.surface);
+                icon = ContextCompat.getColor(c, R.color.accent);
+                haloColor = ContextCompat.getColor(c, R.color.surface_variant);
+                haloAlpha = 1f;
+                break;
+        }
+        boolean idle = power == Power.OFF || power == Power.ERROR;
+        float density = getResources().getDisplayMetrics().density;
+        powerButton.setStrokeColor(ContextCompat.getColor(c, R.color.outline));
+        powerButton.setStrokeWidth(idle ? Math.round(density) : 0);
+        powerButton.setCardElevation(idle ? 6 * density : 0);
+        powerButton.setCardBackgroundColor(core);
+        powerIcon.setImageTintList(ColorStateList.valueOf(icon));
+        powerHalo.setBackgroundTintList(ColorStateList.valueOf(
+                androidx.core.graphics.ColorUtils.setAlphaComponent(haloColor, Math.round(haloAlpha * 255))));
+        boolean pulsing = power == Power.CONNECTING;
+        if (pulsing && pulse == null) {
+            pulse = android.animation.ObjectAnimator.ofPropertyValuesHolder(powerHalo,
+                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 0.86f, 1f),
+                    android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.86f, 1f));
+            pulse.setDuration(900);
+            pulse.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+            pulse.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+            pulse.start();
+        } else if (!pulsing && pulse != null) {
+            pulse.cancel();
+            pulse = null;
+            powerHalo.setScaleX(1f);
+            powerHalo.setScaleY(1f);
+        }
+    }
+
+    /** Кнопка питания VPN МГТУ. Без файла профиля или учётных данных — сначала они. */
+    private void togglePower() {
+        if (RoutingVpnService.isCorpOn()) {
+            ((MainActivity) requireActivity()).toggleCorp();
+        } else if (!settings.hasBmstuOvpn()) {
+            toast("Сначала импортируйте файл профиля .ovpn от университета.");
+            pickOvpn.launch(new String[]{"*/*"});
+        } else if (!settings.hasBmstuCredentials()) {
+            editCredentials(true);
+        } else {
+            ((MainActivity) requireActivity()).toggleCorp();
+        }
     }
 
     /** Последнее сообщение менеджера туннеля (причина ошибки, время повтора). */
@@ -274,14 +331,12 @@ public class CorpFragment extends Fragment implements BmstuManager.Listener, Rou
 
     // ---------- Действия ----------
 
-    private void setEnabled(boolean enabled) {
-        settings.setBmstuEnabled(enabled);
-        if (enabled && !settings.hasBmstuCredentials()) editCredentials();
-        RoutingVpnService.send(requireContext(), RoutingVpnService.ACTION_BMSTU_SYNC);
-        render();
+    private void editCredentials() {
+        editCredentials(false);
     }
 
-    private void editCredentials() {
+    /** Диалог логина и пароля; connectAfter — после сохранения включить VPN МГТУ (нажата кнопка питания). */
+    private void editCredentials(boolean connectAfter) {
         View v = getLayoutInflater().inflate(R.layout.dialog_credentials, null, false);
         TextInputEditText user = v.findViewById(R.id.credUserInput);
         TextInputEditText pass = v.findViewById(R.id.credPassInput);
@@ -298,9 +353,10 @@ public class CorpFragment extends Fragment implements BmstuManager.Listener, Rou
                         return;
                     }
                     settings.setBmstuCredentials(u, p);
-                    if (!settings.isBmstuEnabled()) settings.setBmstuEnabled(true);
+                    // Включённый туннель переподключится с новыми данными
                     RoutingVpnService.send(requireContext(), RoutingVpnService.ACTION_BMSTU_SYNC);
                     bindStatic();
+                    if (connectAfter && settings.hasBmstuOvpn()) ((MainActivity) requireActivity()).toggleCorp();
                 })
                 .setNegativeButton(android.R.string.cancel, null).show();
     }

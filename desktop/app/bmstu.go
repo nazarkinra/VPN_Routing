@@ -39,6 +39,8 @@ const (
 	BmstuConnecting BmstuState = "connecting"
 	BmstuUp         BmstuState = "up"
 	BmstuWaiting    BmstuState = "waiting"
+	// BmstuError — VPN МГТУ не включился (ошибка запуска ядра, нет сети); туннель не работает.
+	BmstuError BmstuState = "error"
 )
 
 // BmstuStatus — состояние туннеля для интерфейса.
@@ -106,6 +108,19 @@ func (b *Bmstu) setState(s BmstuState, msg string) {
 	b.state, b.message = s, msg
 	b.mu.Unlock()
 	logf("bmstu %s: %s", s, msg)
+}
+
+// reportError — VPN МГТУ не включился: показать причину на вкладке МГТУ.
+func (b *Bmstu) reportError(msg string) {
+	done := make(chan struct{})
+	b.run(func() {
+		b.setState(BmstuError, msg)
+		close(done)
+	})
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
 }
 
 // Status — снимок для экрана (статистика как в OpenVPN Connect).
@@ -217,11 +232,7 @@ func (b *Bmstu) StopAll() {
 	b.run(func() {
 		b.active = false
 		b.stopTunnel()
-		if b.store.BmstuEnabled() {
-			b.setState(BmstuOff, "VPN отключён")
-		} else {
-			b.setState(BmstuOff, "Выключен")
-		}
+		b.setState(BmstuOff, "Выключен")
 		close(done)
 	})
 	select {

@@ -61,6 +61,9 @@ public final class XrayConfig {
     public static String build(ProxyLink link, String serverIp, String localDns, Collection<String> exceptions,
                                BmstuRoute bmstu, List<String> directDomains, List<String> tunnelDomains)
             throws JSONException {
+        // link == null — режим «только МГТУ»: основного сервера нет, bmstu.ru идёт в туннель университета,
+        // всё остальное (и DNS) — напрямую
+        boolean corpOnly = link == null;
         List<String> userDomains = new ArrayList<>();
         List<String> userCidrs = new ArrayList<>();
         for (String item : exceptions) {
@@ -73,11 +76,12 @@ public final class XrayConfig {
         root.put("log", BuildConfig.DEBUG
                 ? new JSONObject().put("loglevel", "info").put("dnsLog", true)
                 : new JSONObject().put("loglevel", "warning").put("access", "none"));
-        root.put("dns", dns(localDns, directDomains, userDomains));
+        root.put("dns", corpOnly ? directDns(localDns) : dns(localDns, directDomains, userDomains));
         root.put("inbounds", new JSONArray().put(tunInbound()));
-        JSONArray outbounds = new JSONArray()
-                .put(proxyOutbound(link, serverIp))   // первый outbound — маршрут по умолчанию, как final: proxy
-                .put(new JSONObject().put("tag", "direct").put("protocol", "freedom")
+        JSONArray outbounds = new JSONArray();
+        // Первый outbound — маршрут по умолчанию: proxy (как final: proxy), без основного VPN — direct
+        if (!corpOnly) outbounds.put(proxyOutbound(link, serverIp));
+        outbounds.put(new JSONObject().put("tag", "direct").put("protocol", "freedom")
                         .put("streamSettings", new JSONObject()
                                 .put("sockopt", new JSONObject().put("domainStrategy", "UseIPv4"))))
                 .put(new JSONObject().put("tag", "block").put("protocol", "blackhole"))
@@ -85,8 +89,20 @@ public final class XrayConfig {
                         .put("settings", new JSONObject().put("nonIPQuery", "reject")));
         if (bmstu != null) outbounds.put(bmstuOutbound(bmstu));
         root.put("outbounds", outbounds);
-        root.put("routing", routing(localDns, directDomains, tunnelDomains, userDomains, userCidrs, bmstu != null));
+        root.put("routing", routing(localDns, directDomains, tunnelDomains, userDomains, userCidrs, bmstu != null,
+                corpOnly));
         return root.toString(2);
+    }
+
+    /** DNS без основного VPN: все домены через DNS сети, затем запасные (TCP и DoH напрямую). */
+    private static JSONObject directDns(String localDns) throws JSONException {
+        JSONArray servers = new JSONArray();
+        if (localDns != null && !localDns.isEmpty()) servers.put(dnsServer(localDns).put("port", 53));
+        for (String address : RoutingRules.FALLBACK_LOCAL_DNS) servers.put(dnsServer(address));
+        return new JSONObject()
+                .put("tag", "dns-internal")
+                .put("queryStrategy", "UseIPv4")
+                .put("servers", servers);
     }
 
     /** Конфиг для замера задержки сервера: только VLESS-выход, без туннеля и правил. */
@@ -159,7 +175,7 @@ public final class XrayConfig {
 
     private static JSONObject routing(String localDns, List<String> directDomains, List<String> tunnelDomains,
                                       List<String> userDomains, List<String> userCidrs,
-                                      boolean bmstu) throws JSONException {
+                                      boolean bmstu, boolean corpOnly) throws JSONException {
         JSONArray rules = new JSONArray();
 
         // Запросы самого DNS-модуля к DNS сети идут напрямую, к 8.8.8.8 — через VPN (правило по умолчанию)
@@ -183,6 +199,8 @@ public final class XrayConfig {
             rules.put(rule().put("domain", new JSONArray().put("domain:" + BMSTU_DOMAIN))
                     .put("network", "udp").put("port", "443").put("outboundTag", "block"));
         }
+        // Без основного VPN всё остальное и так идёт напрямую: остальные правила не нужны
+        if (corpOnly) return new JSONObject().put("domainStrategy", "AsIs").put("rules", rules);
 
         rules.put(rule().put("ip", toArray(RoutingRules.PRIVATE_CIDRS)).put("outboundTag", "direct"));
         rules.put(rule().put("port", RoutingRules.DIRECT_PORTS).put("outboundTag", "direct"));

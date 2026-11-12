@@ -63,8 +63,11 @@ func startBackend(dir string, flags map[string]bool) *backend {
 	// Перезапуск новой программой после обновления: VPN поднимется снова, если был включён
 	b.updater.Restart = func() {
 		b.restartArgs = []string{"--after-update", "--hidden"}
-		if b.vpn.Active() {
+		// Флаг VPN МГТУ сохраняется в настройках; --connect-corp — поднять его и без основного
+		if b.vpn.MainActive() {
 			b.restartArgs = append(b.restartArgs, "--connect")
+		} else if b.vpn.CorpOn() {
+			b.restartArgs = append(b.restartArgs, "--connect-corp")
 		}
 		b.quit()
 	}
@@ -88,8 +91,14 @@ func startBackend(dir string, flags map[string]bool) *backend {
 			b.servers.RefreshAll(true)
 		}
 	}()
-	if flags["connect"] || store.Prefs().ConnectOnStart {
-		b.vpn.Start()
+	// Части VPN поднимаются, как были: основной — по флагу или настройке, МГТУ — если был включён
+	switch {
+	case flags["connect"] || store.Prefs().ConnectOnStart:
+		b.vpn.Restore(true)
+	case flags["connect-corp"]:
+		b.vpn.Restore(false)
+	default:
+		store.SetBmstuEnabled(false)
 	}
 	return b
 }

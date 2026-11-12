@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"image/color"
 	"io"
 	"strings"
 	"time"
@@ -23,11 +22,9 @@ type corpTab struct {
 	u    *UI
 	root fyne.CanvasObject
 
-	enabled      *widget.Check
-	binding      bool
+	power        *powerButton
 	profile      *widget.Label
-	stateDot     *canvas.Circle
-	stateTitle   *widget.Label
+	stateTitle   *canvas.Text
 	stateDetail  *widget.Label
 	stats        *fyne.Container
 	statDuration *widget.Label
@@ -48,21 +45,16 @@ type corpTab struct {
 
 func newCorpTab(u *UI) *corpTab {
 	t := &corpTab{u: u}
-	t.enabled = widget.NewCheck("VPN МГТУ включён", func(on bool) {
-		if t.binding {
-			return
-		}
-		u.act("/api/bmstu/enabled", map[string]bool{"on": on}, "", func(*api.Result) {
-			if st := u.state(); on && st != nil && !st.Bmstu.HasCredentials {
-				t.editCredentials()
-			}
-		})
-	})
+	// Кнопка питания VPN МГТУ — как на вкладке VPN, но включает только туннель университета
+	t.power = newPowerButton(t.toggle)
+	t.stateTitle = canvas.NewText("Не подключено", themePal().text)
+	t.stateTitle.TextSize = 22
+	t.stateTitle.TextStyle = fyne.TextStyle{Bold: true}
+	t.stateDetail = widget.NewLabel("")
+	t.stateDetail.Wrapping = fyne.TextWrapWord
 	t.profile = widget.NewLabel("Профиль не загружен")
+	t.profile.Wrapping = fyne.TextWrapWord
 	t.profile.Importance = widget.LowImportance
-	t.stateDot = canvas.NewCircle(colIdle)
-	t.stateTitle = widget.NewLabelWithStyle("Отключено", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	t.stateDetail = wrapped("")
 
 	t.statDuration, t.statAddress, t.statIn, t.statOut = statValue(), statValue(), statValue(), statValue()
 	t.stats = container.NewVBox(sectionHead("СТАТИСТИКА", ""), card(container.NewGridWithColumns(2,
@@ -99,16 +91,12 @@ func newCorpTab(u *UI) *corpTab {
 	head.TextSize = 24
 	head.TextStyle = fyne.TextStyle{Bold: true}
 
-	profileCard := card(
-		container.NewBorder(nil, nil, iconBox("school", colCorp, true), t.enabled,
-			container.New(&tightVBox{}, title("МГТУ им. Н. Э. Баумана"), t.profile)),
-		widget.NewSeparator(),
-		container.NewBorder(nil, nil, container.NewCenter(container.NewGridWrap(fyne.NewSize(10, 10), t.stateDot)), nil,
-			container.New(&tightVBox{}, t.stateTitle, t.stateDetail)),
-	)
+	connect := card(container.NewBorder(nil, nil,
+		container.NewGridWrap(fyne.NewSize(112, 112), t.power), nil,
+		container.NewVBox(layout.NewSpacer(), t.stateTitle, t.stateDetail, t.profile, layout.NewSpacer())))
 	body := container.NewVBox(
 		container.NewHBox(head, layout.NewSpacer()),
-		sectionHead("ПРОФИЛЬ", ""), profileCard,
+		connect,
 		t.stats,
 		sectionHead("УЧЁТНЫЕ ДАННЫЕ", ""),
 		card(container.NewBorder(nil, nil, iconBox("lock", themePal().accent, false), editCred,
@@ -118,8 +106,8 @@ func newCorpTab(u *UI) *corpTab {
 			container.New(&tightVBox{}, t.fileTitle, t.fileInfo))),
 		sectionHead("ЖУРНАЛ", "", copyLog),
 		card(logScroll),
-		wrapped("Через туннель МГТУ идёт только bmstu.ru и его поддомены. Туннель работает вместе с основным VPN. "+
-			"Пока туннель не поднят, сайты МГТУ открываются напрямую."),
+		wrapped("Через туннель МГТУ идёт только bmstu.ru и его поддомены. VPN МГТУ и основной VPN включаются "+
+			"независимо: каждый своей кнопкой. Пока туннель не поднят, сайты МГТУ открываются напрямую."),
 	)
 	t.root = container.NewVScroll(container.NewPadded(body))
 	return t
@@ -137,40 +125,42 @@ func statCell(name string, value *widget.Label) fyne.CanvasObject {
 
 func (t *corpTab) update(st *api.State, force bool) {
 	b, s := st.Bmstu, st.Bmstu.Status
-	vpnActive := st.VPN.State == "connected" || st.VPN.State == "connecting"
-	t.binding = true
-	t.enabled.SetChecked(b.Enabled)
-	t.binding = false
 
-	var head, detail string
-	var c color.Color
+	// Кнопка питания: состояние только VPN МГТУ, основной VPN на неё не влияет
+	power, head, detail := "stopped", "Не подключено", "Нажмите на кнопку, чтобы подключиться"
+	important := widget.MediumImportance
 	switch {
-	case !b.Enabled:
-		head, detail, c = "Отключено", "Включите, чтобы сайты МГТУ шли через корпоративную сеть", colIdle
+	case b.Enabled && s.State == "up":
+		power, head, detail = "connected", "Подключено", "bmstu.ru идёт через сеть МГТУ"
+		if s.UpSince > 0 {
+			detail = fmtDuration(time.Since(time.UnixMilli(s.UpSince))) + " · " + detail
+		}
+	case b.Enabled && s.State == "waiting":
+		power, head, detail = "connecting", "Нет соединения", s.Message
+		important = widget.DangerImportance
+	case b.Enabled:
+		power, head, detail = "connecting", "Подключение…", "Рукопожатие с сервером OpenVPN"
+	case s.State == "error":
+		power, head, detail = "error", "Ошибка подключения", s.Message
+		important = widget.DangerImportance
 	case !b.HasOvpn:
-		head, detail, c = "Нужен файл профиля", "Импортируйте .ovpn от университета в разделе «Файл профиля»", colWait
+		detail = "Сначала импортируйте .ovpn от университета в разделе «Файл профиля»"
 	case !b.HasCredentials:
-		head, detail, c = "Нужны логин и пароль", "Укажите их в разделе «Учётные данные»", colWait
-	case !vpnActive:
-		head, detail, c = "Ожидает основной VPN", "Подключится вместе с основным VPN на вкладке VPN", colIdle
-	case s.State == "up":
-		head, detail, c = "Подключено", "bmstu.ru идёт через сеть МГТУ", colOK
-	case s.State == "connecting":
-		head, detail, c = "Подключение…", "Рукопожатие с сервером OpenVPN", colWait
-	case s.State == "waiting":
-		head, detail, c = "Нет соединения", s.Message, colError
-	default:
-		head, detail, c = "Отключено", s.Message, colIdle
+		detail = "Сначала укажите логин и пароль в разделе «Учётные данные»"
 	}
-	t.stateTitle.SetText(head)
+	t.power.SetState(power)
+	t.stateTitle.Text = head
+	t.stateTitle.Color = themePal().text
+	t.stateTitle.Refresh()
+	t.stateDetail.Importance = important
 	if t.stateDetail.Text != detail {
 		t.stateDetail.SetText(detail)
+	} else {
+		t.stateDetail.Refresh()
 	}
-	t.stateDot.FillColor = c
-	t.stateDot.Refresh()
 
 	if b.HasOvpn {
-		t.profile.SetText(b.Profile)
+		t.profile.SetText("МГТУ им. Н. Э. Баумана · " + b.Profile)
 		t.fileTitle.SetText("Загруженный .ovpn")
 		t.fileInfo.SetText(b.FileInfo)
 	} else {
@@ -195,7 +185,7 @@ func (t *corpTab) update(st *api.State, force bool) {
 	}
 
 	// Статистика, как в OpenVPN Connect: время, адрес, трафик и скорость
-	if s.State == "up" && vpnActive {
+	if s.State == "up" && b.Enabled {
 		t.stats.Show()
 		if s.UpSince > 0 {
 			t.statDuration.SetText(fmtDuration(time.Since(time.UnixMilli(s.UpSince))))
@@ -235,6 +225,24 @@ func (t *corpTab) update(st *api.State, force bool) {
 	}
 }
 
+// toggle — кнопка питания VPN МГТУ. Без файла профиля или учётных данных — сначала они.
+func (t *corpTab) toggle() {
+	st := t.u.state()
+	if st == nil {
+		return
+	}
+	switch {
+	case st.Bmstu.Enabled:
+		t.u.act("/api/bmstu/disconnect", struct{}{}, "", nil)
+	case !st.Bmstu.HasOvpn:
+		t.importOvpn()
+	case !st.Bmstu.HasCredentials:
+		t.editCredentialsThen(func() { t.u.act("/api/bmstu/connect", struct{}{}, "", nil) })
+	default:
+		t.u.act("/api/bmstu/connect", struct{}{}, "", nil)
+	}
+}
+
 func orDash(s string) string {
 	if s == "" {
 		return "—"
@@ -242,7 +250,10 @@ func orDash(s string) string {
 	return s
 }
 
-func (t *corpTab) editCredentials() {
+func (t *corpTab) editCredentials() { t.editCredentialsThen(nil) }
+
+// editCredentialsThen — диалог логина и пароля; after — после сохранения (например, подключиться).
+func (t *corpTab) editCredentialsThen(after func()) {
 	st := t.u.state()
 	user := widget.NewEntry()
 	pass := widget.NewPasswordEntry()
@@ -258,7 +269,12 @@ func (t *corpTab) editCredentials() {
 		widget.NewFormItem(passLabel, pass),
 	}, func(ok bool) {
 		if ok {
-			t.u.act("/api/bmstu/credentials", map[string]string{"user": user.Text, "pass": pass.Text}, "Учётные данные сохранены", nil)
+			t.u.act("/api/bmstu/credentials", map[string]string{"user": user.Text, "pass": pass.Text}, "Учётные данные сохранены",
+				func(*api.Result) {
+					if after != nil {
+						after()
+					}
+				})
 		}
 	}, t.u.win)
 	d.Resize(fyne.NewSize(460, 0))

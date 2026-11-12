@@ -47,7 +47,13 @@ final class BmstuManager {
     /** Отказов во входе подряд; сбрасывается при успешном подключении. */
     private int authFailures;
 
-    enum State { OFF, CONNECTING, UP, WAITING }
+    /** ERROR — VPN МГТУ не включился (ошибка запуска ядра, нет сети); туннель не работает. */
+    enum State { OFF, CONNECTING, UP, WAITING, ERROR }
+
+    /** VPN МГТУ не включился: показать причину на вкладке МГТУ (в очереди — после остановки туннеля). */
+    void reportError(String text) {
+        run(() -> setState(State.ERROR, text));
+    }
 
     interface Listener {
         void onBmstuState(State state, String message);
@@ -189,7 +195,7 @@ final class BmstuManager {
         run(() -> {
             active = false;
             stopTunnel();
-            setState(State.OFF, settings.isBmstuEnabled() ? "VPN отключён" : "Выключен");
+            setState(State.OFF, "Выключен");
         });
     }
 

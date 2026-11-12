@@ -116,6 +116,11 @@ func (t *vpnTab) update(st *api.State, force bool) {
 	} else {
 		t.statusDetail.Refresh()
 	}
+	t.updateRest(st, force)
+}
+
+// updateRest — текущий сервер и список серверов.
+func (t *vpnTab) updateRest(st *api.State, force bool) {
 	cur := "Сервер не выбран · добавьте ссылку vless://, hysteria2:// или подписку"
 	if c := st.Current; c != nil {
 		cur = c.Title + " · " + c.Subtitle
