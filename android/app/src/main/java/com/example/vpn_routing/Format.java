@@ -23,6 +23,14 @@ final class Format {
         return String.format(Locale.forLanguageTag("ru"), v >= 100 ? "%.0f %s" : "%.1f %s", v, units[i]);
     }
 
+    /** «1 приложение», «3 приложения», «5 приложений». */
+    static String apps(int n) {
+        int d = n % 10, h = n % 100;
+        String word = d == 1 && h != 11 ? "приложение"
+                : d >= 2 && d <= 4 && (h < 12 || h > 14) ? "приложения" : "приложений";
+        return n + " " + word;
+    }
+
     /** Длительность: «12:34» или «1:02:03». */
     static String duration(long ms) {
         long s = Math.max(0, ms / 1000);

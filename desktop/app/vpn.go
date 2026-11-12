@@ -451,7 +451,8 @@ func (v *VPN) startCore(url string) error {
 		}
 		route = &core.BmstuRoute{Port: p.Port(), User: p.User(), Password: p.Password()}
 	}
-	config, err := core.BuildConfig(link, serverIP, up.DNS, v.store.Exceptions(), v.store.Builtins(), route, v.tunOptions())
+	config, err := core.BuildConfig(link, serverIP, up.DNS, v.store.Exceptions(), v.store.Builtins(), route,
+		v.store.AppRules(), v.tunOptions())
 	if err != nil {
 		return err
 	}

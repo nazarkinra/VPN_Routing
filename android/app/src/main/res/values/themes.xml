@@ -52,6 +52,26 @@
         <item name="android:textColor">@color/text_secondary</item>
     </style>
 
+    <!-- Кнопки выбора режима на экране «Приложения» -->
+    <style name="ModeButton" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingEnd">4dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:singleLine">false</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:textColor">@color/mode_text</item>
+        <item name="backgroundTint">@color/mode_bg</item>
+        <item name="strokeColor">@color/outline</item>
+    </style>
+
     <style name="Caption">
         <item name="android:textSize">13sp</item>
         <item name="android:textColor">@color/text_secondary</item>

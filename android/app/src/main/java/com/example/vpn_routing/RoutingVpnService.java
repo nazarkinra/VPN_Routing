@@ -48,6 +48,8 @@ public class RoutingVpnService extends VpnService {
     public static final String ACTION_STOP_CORP = "com.example.vpn_routing.STOP_CORP";
     /** Пересобрать конфиг (после изменения исключений), туннель не закрывается. */
     public static final String ACTION_RELOAD = "com.example.vpn_routing.RELOAD";
+    /** Изменилась маршрутизация по приложениям: пересоздать туннель с новым списком приложений. */
+    public static final String ACTION_RELOAD_APPS = "com.example.vpn_routing.RELOAD_APPS";
     /** Применить новый ключ: при ошибке вернуть прежний (как update-vpn с восстановлением снимка). */
     public static final String ACTION_APPLY_KEY = "com.example.vpn_routing.APPLY_KEY";
     public static final String EXTRA_URL = "url";
@@ -269,6 +271,8 @@ public class RoutingVpnService extends VpnService {
             worker.execute(() -> {
                 if (core != null) restartCore("Правила обновлены");
             });
+        } else if (ACTION_RELOAD_APPS.equals(action)) {
+            worker.execute(this::reloadApps);
         } else if (ACTION_BMSTU_SYNC.equals(action)) {
             worker.execute(() -> {
                 if (core != null && settings.isBmstuEnabled()) bmstu.restart();
@@ -392,6 +396,29 @@ public class RoutingVpnService extends VpnService {
         }
     }
 
+    /**
+     * Список приложений задаётся при создании туннеля (VpnService.Builder), поэтому туннель создаётся заново:
+     * новый заменяет прежний, ядро перезапускается на нём, затем прежний закрывается.
+     */
+    private void reloadApps() {
+        if (core == null) return;
+        ParcelFileDescriptor old = tun;
+        try {
+            tun = establishTun();
+        } catch (Exception e) {
+            tun = old;
+            fail(e, errorText(e));
+            return;
+        }
+        restartCore("Приложения обновлены");
+        if (old != null && old != tun) {
+            try {
+                old.close();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     private void restartCore(String okMessage) {
         try {
             startCore(settings.getVlessUrl());
@@ -472,12 +499,7 @@ public class RoutingVpnService extends VpnService {
         // (адрес сети без битов хоста: старые Android иначе отвечают «Bad address»)
         builder.addRoute("172.19.0.0", 30);
         builder.addRoute("fdfe:dcba:9876::", 126);
-        try {
-            // Соединения самого Xray (к VPS и напрямую) идут мимо туннеля — как sockopt.interface на Pi
-            builder.addDisallowedApplication(getPackageName());
-        } catch (PackageManager.NameNotFoundException e) {
-            throw new IllegalStateException(e);
-        }
+        applyApps(builder);
         Intent open = new Intent(this, MainActivity.class);
         builder.setConfigureIntent(PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE));
 
@@ -486,6 +508,51 @@ public class RoutingVpnService extends VpnService {
             throw new IllegalStateException("Нет разрешения на VPN. Откройте приложение и подключитесь вручную.");
         }
         return pfd;
+    }
+
+    /**
+     * Маршрутизация по приложениям. Приложение вне туннеля идёт напрямую в сеть — мимо всех правил,
+     * в том числе мимо VPN МГТУ. Само приложение VPN routing в туннель не попадает никогда: соединения Xray
+     * (к серверу и напрямую) идут мимо него — как sockopt.interface на Pi.
+     */
+    private void applyApps(Builder builder) {
+        String mode = settings.getAppsMode();
+        List<String> selected = settings.getActiveApps();
+        int added = 0;
+        if (Settings.APPS_INCLUDE.equals(mode) && !selected.isEmpty()) {
+            // В туннеле — только выбранные (себя среди разрешённых нет, значит, и мы вне туннеля)
+            for (String pkg : selected) {
+                if (pkg.equals(getPackageName())) continue;
+                try {
+                    builder.addAllowedApplication(pkg);
+                    added++;
+                } catch (PackageManager.NameNotFoundException e) {
+                    Log.i(TAG, "app not installed: " + pkg);
+                }
+            }
+            if (added > 0) {
+                Log.i(TAG, "apps: only " + added + " selected via VPN");
+                return;
+            }
+            // Ни одно из выбранных не установлено: пустой список разрешённых означал бы «все»
+        }
+        disallow(builder, getPackageName());
+        if (Settings.APPS_EXCLUDE.equals(mode)) {
+            for (String pkg : selected) {
+                if (!pkg.equals(getPackageName()) && disallow(builder, pkg)) added++;
+            }
+            Log.i(TAG, "apps: " + added + " selected bypass VPN");
+        }
+    }
+
+    private static boolean disallow(Builder builder, String pkg) {
+        try {
+            builder.addDisallowedApplication(pkg);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            Log.i(TAG, "app not installed: " + pkg);
+            return false;
+        }
     }
 
     private void stopCore() {

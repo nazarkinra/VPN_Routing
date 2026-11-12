@@ -33,6 +33,22 @@ type Builtins struct {
 // AllBuiltins — все встроенные правила.
 func AllBuiltins() Builtins { return Builtins{Direct: DirectDomains, Tunnel: DirectTunnelDomains} }
 
+// Режимы маршрутизации по приложениям.
+const (
+	// AppsAll — все приложения идут по правилам (по умолчанию).
+	AppsAll = ""
+	// AppsInclude — по правилам идут только выбранные приложения, остальные — напрямую.
+	AppsInclude = "include"
+	// AppsExclude — выбранные приложения идут напрямую, остальные — по правилам.
+	AppsExclude = "exclude"
+)
+
+// AppRules — маршрутизация по приложениям: режим и имена процессов (telegram.exe, firefox).
+type AppRules struct {
+	Mode  string
+	Names []string
+}
+
 // BmstuRoute — локальный SOCKS-прокси туннеля МГТУ.
 type BmstuRoute struct {
 	Port     int
@@ -68,9 +84,11 @@ type arr = []any
 //	exceptions — исключения пользователя (домены и подсети)
 //	bmstu      — прокси туннеля МГТУ или nil, если VPN МГТУ выключен
 //
+//	apps       — маршрутизация по приложениям (какие программы идут по правилам, а какие напрямую)
+//
 // link == nil — режим «только МГТУ»: основного сервера нет, bmstu.ru идёт в туннель университета,
 // всё остальное (и DNS) — напрямую.
-func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string, builtins Builtins, bmstu *BmstuRoute, tun TunOptions) (string, error) {
+func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string, builtins Builtins, bmstu *BmstuRoute, apps AppRules, tun TunOptions) (string, error) {
 	corpOnly := link == nil
 	var userDomains, userCIDRs []string
 	for _, item := range exceptions {
@@ -117,7 +135,7 @@ func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string
 		"dns":       dns,
 		"inbounds":  arr{tunInbound(tun)},
 		"outbounds": outbounds,
-		"routing":   routing(localDNS, builtins, userDomains, userCIDRs, bmstu != nil, corpOnly),
+		"routing":   routing(localDNS, builtins, userDomains, userCIDRs, bmstu != nil, corpOnly, apps),
 	}
 	b, err := json.MarshalIndent(root, "", "  ")
 	return string(b), err
@@ -243,40 +261,90 @@ func toArr(items []string) arr {
 	return a
 }
 
-func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string, bmstu, corpOnly bool) obj {
+func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string, bmstu, corpOnly bool, apps AppRules) obj {
 	var rules arr
 	// Запросы DNS-модуля к DNS сети идут напрямую, к 8.8.8.8 — через VPN (правило по умолчанию)
 	// (у запасных серверов «+local»: они и так идут мимо правил)
 	if localDNS != "" {
 		rules = append(rules, rule("inboundTag", arr{"dns-internal"}, "ip", arr{localDNS}, "outboundTag", "direct"))
 	}
-	// hijack-dns: любой DNS-запрос из туннеля обрабатывает DNS-модуль Xray
+	// hijack-dns: любой DNS-запрос из туннеля обрабатывает DNS-модуль Xray. DNS запрашивает системный
+	// резолвер, а не сама программа, поэтому он одинаков для всех приложений
 	rules = append(rules, rule("inboundTag", arr{"tun-in"}, "port", "53", "outboundTag", "dns-out"))
+	if !corpOnly {
+		// Локальная сеть и VPN-протоколы — напрямую у любых приложений
+		rules = append(rules, rule("ip", toArr(PrivateCIDRs), "outboundTag", "direct"))
+		rules = append(rules, rule("port", DirectPorts, "outboundTag", "direct"))
+	}
+
+	// Правила, которые действуют на приложения «по нашим правилам»
+	var policy arr
 	// Сайты МГТУ — через туннель университета; домен известен из HTTP и TLS, поэтому только TCP
 	if bmstu {
-		rules = append(rules, rule("domain", arr{"domain:" + BmstuDomain}, "network", "tcp", "outboundTag", "bmstu"))
+		policy = append(policy, rule("domain", arr{"domain:" + BmstuDomain}, "network", "tcp", "outboundTag", "bmstu"))
 		// QUIC к сайтам МГТУ отклоняется: прокси туннеля только TCP, браузер перейдёт на TCP
-		rules = append(rules, rule("domain", arr{"domain:" + BmstuDomain}, "network", "udp", "port", "443", "outboundTag", "block"))
+		policy = append(policy, rule("domain", arr{"domain:" + BmstuDomain}, "network", "udp", "port", "443", "outboundTag", "block"))
 	}
 	// Без основного VPN всё остальное и так идёт напрямую: остальные правила не нужны
-	if corpOnly {
-		return obj{"domainStrategy": "AsIs", "rules": rules}
+	if !corpOnly {
+		// Правило с пустым списком доменов не добавляется (все встроенные могли быть удалены)
+		if tunnels := domainList(builtins.Tunnel, nil); len(tunnels) > 0 {
+			policy = append(policy, rule("domain", tunnels, "outboundTag", "direct"))
+		}
+		if direct := domainList(builtins.Direct, userDomains); len(direct) > 0 {
+			policy = append(policy, rule("domain", direct, "outboundTag", "direct"))
+		}
+		if len(userCIDRs) > 0 {
+			policy = append(policy, rule("ip", toArr(userCIDRs), "outboundTag", "direct"))
+		}
+		// QUIC к зарубежным ресурсам отклоняется: приложения сразу переходят на TCP
+		policy = append(policy, rule("network", "udp", "port", "443", "outboundTag", "block"))
 	}
-	rules = append(rules, rule("ip", toArr(PrivateCIDRs), "outboundTag", "direct"))
-	rules = append(rules, rule("port", DirectPorts, "outboundTag", "direct"))
-	// Правило с пустым списком доменов не добавляется (все встроенные могли быть удалены)
-	if tunnels := domainList(builtins.Tunnel, nil); len(tunnels) > 0 {
-		rules = append(rules, rule("domain", tunnels, "outboundTag", "direct"))
+
+	// Маршрутизация по приложениям (процессам)
+	names := processNames(apps.Names)
+	switch {
+	case apps.Mode == AppsExclude && len(names) > 0:
+		// Выбранные — целиком напрямую (и мимо туннеля МГТУ), остальные — по правилам
+		rules = append(rules, rule("process", names, "outboundTag", "direct"))
+		rules = append(rules, policy...)
+	case apps.Mode == AppsInclude && len(names) > 0:
+		// По правилам — только выбранные: у каждого правила условие «процесс из списка»; выбранные, не
+		// попавшие ни под одно правило, — в маршрут по умолчанию; все остальные приложения — напрямую
+		for _, r := range policy {
+			r.(obj)["process"] = names
+			rules = append(rules, r)
+		}
+		def := "direct"
+		if !corpOnly {
+			def = "proxy"
+		}
+		rules = append(rules, rule("process", names, "network", "tcp,udp", "outboundTag", def))
+		rules = append(rules, rule("network", "tcp,udp", "outboundTag", "direct"))
+	default:
+		rules = append(rules, policy...)
 	}
-	if direct := domainList(builtins.Direct, userDomains); len(direct) > 0 {
-		rules = append(rules, rule("domain", direct, "outboundTag", "direct"))
-	}
-	if len(userCIDRs) > 0 {
-		rules = append(rules, rule("ip", toArr(userCIDRs), "outboundTag", "direct"))
-	}
-	// QUIC к зарубежным ресурсам отклоняется: приложения сразу переходят на TCP
-	rules = append(rules, rule("network", "udp", "port", "443", "outboundTag", "block"))
 	return obj{"domainStrategy": "AsIs", "rules": rules}
+}
+
+// processNames — имена процессов для правила Xray. Xray сравнивает имя без «.exe» с учётом регистра,
+// поэтому к имени добавляется вариант в нижнем регистре (имя, введённое вручную, может отличаться).
+func processNames(names []string) arr {
+	seen := map[string]bool{}
+	var a arr
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		for _, v := range []string{n, strings.ToLower(n)} {
+			if !seen[v] {
+				seen[v] = true
+				a = append(a, v)
+			}
+		}
+	}
+	return a
 }
 
 // domain:example.com в Xray — сам домен и все поддомены (как domain_suffix в sing-box).

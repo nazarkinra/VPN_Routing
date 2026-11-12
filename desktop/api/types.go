@@ -73,14 +73,16 @@ type Autostart struct {
 }
 
 type State struct {
-	Platform   string           `json:"platform"`
-	Version    string           `json:"version"`
-	VPN        app.Status       `json:"vpn"`
-	Current    *ServerView      `json:"current"`
-	Groups     []Group          `json:"groups"`
-	Pinging    bool             `json:"pinging"`
-	Bmstu      Bmstu            `json:"bmstu"`
-	Direct     Direct           `json:"direct"`
+	Platform string      `json:"platform"`
+	Version  string      `json:"version"`
+	VPN      app.Status  `json:"vpn"`
+	Current  *ServerView `json:"current"`
+	Groups   []Group     `json:"groups"`
+	Pinging  bool        `json:"pinging"`
+	Bmstu    Bmstu       `json:"bmstu"`
+	Direct   Direct      `json:"direct"`
+	// Apps — маршрутизация по приложениям.
+	Apps       app.Apps         `json:"apps"`
 	Prefs      app.Prefs        `json:"prefs"`
 	Autostart  Autostart        `json:"autostart"`
 	Update     app.UpdateStatus `json:"update"`
@@ -102,4 +104,6 @@ type Result struct {
 	Errors  []string `json:"errors"`
 	// Subscriptions — названия добавленных подписок (команда «Добавить»).
 	Subscriptions []string `json:"subscriptions"`
+	// Processes — запущенные программы (команда /api/apps/processes).
+	Processes []app.Process `json:"processes"`
 }

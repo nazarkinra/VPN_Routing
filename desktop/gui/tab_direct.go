@@ -58,7 +58,7 @@ func (t *directTab) update(st *api.State, force bool) {
 		t.restore.Hide()
 	}
 	q := strings.ToLower(strings.TrimSpace(t.search.Text))
-	sig := signature(d) + "|" + q
+	sig := signature(d) + "|" + signature(st.Apps) + "|" + q
 	if !force && sig == t.sig {
 		return
 	}
@@ -70,6 +70,13 @@ func (t *directTab) update(st *api.State, force bool) {
 	var objs []fyne.CanvasObject
 	if q == "" {
 		objs = append(objs, wrapped("Эти адреса открываются без VPN, с вашего обычного IP. Остальной трафик идёт через выбранный сервер."))
+		// Маршрутизация по приложениям: какие программы идут по правилам, а какие напрямую
+		title, sub := appsSummary(st.Apps)
+		setup := widget.NewButtonWithIcon("Настроить", theme.SettingsIcon(), t.u.showApps)
+		setup.Importance = widget.LowImportance
+		objs = append(objs, sectionHead("ПРИЛОЖЕНИЯ", ""),
+			card(container.NewBorder(nil, nil, iconBox("apps", themePal().accent, true), container.NewCenter(setup),
+				rowText(title, sub))))
 	}
 	section := func(name string, items []api.Entry, tint string, emptyText string) {
 		var rows []fyne.CanvasObject

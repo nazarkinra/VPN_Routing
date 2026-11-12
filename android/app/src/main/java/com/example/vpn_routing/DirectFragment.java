@@ -77,12 +77,39 @@ public class DirectFragment extends Fragment implements DirectAdapter.Callbacks 
     private void render() {
         // Свои исключения, уже покрытые встроенными правилами (ya.ru при .ru), убираются из списка
         if (settings.compactExceptions() > 0) reloadVpn();
+        String[] apps = appsSummary();
         adapter.submit(settings.getExceptions(), settings.isBmstuEnabled(),
-                settings.getActiveDirectDomains(), settings.getActiveTunnelDomains(), query);
+                settings.getActiveDirectDomains(), settings.getActiveTunnelDomains(), apps[0], apps[1], query);
         int disabled = settings.getDisabledBuiltins().size();
         MenuItem restore = toolbar.getMenu().findItem(R.id.action_restore_builtins);
         restore.setVisible(disabled > 0);
         restore.setTitle(getString(R.string.restore_builtins) + " (" + disabled + ")");
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        render(); // вернулись с экрана «Приложения»
+    }
+
+    @Override
+    public void onApps() {
+        startActivity(new android.content.Intent(requireContext(), AppsActivity.class));
+    }
+
+    /** Заголовок и описание карточки «Приложения». */
+    private String[] appsSummary() {
+        String mode = settings.getAppsMode();
+        int n = settings.getActiveApps().size();
+        if (Settings.APPS_INCLUDE.equals(mode)) {
+            return new String[]{"Только выбранные", n == 0 ? "Приложения не выбраны — пока по правилам идут все"
+                    : Format.apps(n) + " по правилам VPN, остальные — напрямую"};
+        }
+        if (Settings.APPS_EXCLUDE.equals(mode)) {
+            return new String[]{"Кроме выбранных", n == 0 ? "Приложения не выбраны — по правилам идут все"
+                    : Format.apps(n) + " напрямую, остальные — по правилам VPN"};
+        }
+        return new String[]{"Все приложения", "Все приложения идут по правилам VPN"};
     }
 
     @Override

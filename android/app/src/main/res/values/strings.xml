@@ -53,6 +53,19 @@
 
     <!-- Напрямую -->
     <string name="action_search">Поиск</string>
+    <string name="back">Назад</string>
+    <string name="apps_title">Приложения</string>
+    <string name="apps_section">Приложения</string>
+    <string name="apps_mode_all">Все</string>
+    <string name="apps_mode_include">Только выбранные</string>
+    <string name="apps_mode_exclude">Кроме выбранных</string>
+    <string name="apps_hint_all">Все приложения идут по правилам VPN. Выберите режим, чтобы отметить приложения.</string>
+    <string name="apps_hint_include">Отмеченные приложения идут по правилам VPN: сайты из «Напрямую» — напрямую, остальное — через сервер. Все остальные приложения — напрямую, без VPN.</string>
+    <string name="apps_hint_exclude">Отмеченные приложения идут напрямую, без VPN (и мимо VPN МГТУ). Все остальные — по правилам VPN.</string>
+    <string name="apps_show_system">Показывать системные</string>
+    <string name="apps_clear">Снять все отметки</string>
+    <string name="apps_selected">Отмеченные</string>
+    <string name="apps_other">Остальные</string>
     <string name="direct_intro">Эти адреса открываются без VPN, с вашего обычного IP. Остальной трафик идёт через выбранный сервер.</string>
     <string name="direct_user">Добавленные вами</string>
     <string name="direct_user_empty">Пока пусто. Добавьте сайт, если он не работает через VPN: банк, госуслуги, портал вуза.</string>

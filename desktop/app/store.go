@@ -111,7 +111,9 @@ type storeData struct {
 	Subscriptions    []*Subscription `json:"subscriptions"`
 	Bmstu            bmstuData       `json:"bmstu"`
 	Prefs            Prefs           `json:"prefs"`
-	UIToken          string          `json:"uiToken"`
+	// Apps — маршрутизация по приложениям.
+	Apps    Apps   `json:"apps"`
+	UIToken string `json:"uiToken"`
 	// Обновления: время последней проверки (мс Unix) и версия, отложенная кнопкой «Позже»
 	UpdateLastCheck int64 `json:"updateLastCheck,omitempty"`
 	UpdateSkipped   int   `json:"updateSkipped,omitempty"`
@@ -230,6 +232,63 @@ func (s *Store) SetPrefs(p Prefs) {
 	defer s.mu.Unlock()
 	s.d.Prefs = p
 	s.save()
+}
+
+// ---------- Маршрутизация по приложениям ----------
+
+// Apps — режим (core.AppsAll, AppsInclude, AppsExclude) и списки программ для каждого режима:
+// при переключении режима выбор другого режима сохраняется.
+type Apps struct {
+	Mode    string   `json:"mode"`
+	Include []string `json:"include"`
+	Exclude []string `json:"exclude"`
+}
+
+func (s *Store) Apps() Apps {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.d.Apps
+	a.Include = append([]string{}, a.Include...)
+	a.Exclude = append([]string{}, a.Exclude...)
+	return a
+}
+
+// SetApps сохраняет режим и списки (имена без повторов, без учёта регистра).
+func (s *Store) SetApps(a Apps) {
+	if a.Mode != core.AppsInclude && a.Mode != core.AppsExclude {
+		a.Mode = core.AppsAll
+	}
+	a.Include, a.Exclude = uniqueNames(a.Include), uniqueNames(a.Exclude)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.d.Apps = a
+	s.save()
+}
+
+// AppRules — правила для конфига Xray (список действующего режима).
+func (s *Store) AppRules() core.AppRules {
+	a := s.Apps()
+	switch a.Mode {
+	case core.AppsInclude:
+		return core.AppRules{Mode: a.Mode, Names: a.Include}
+	case core.AppsExclude:
+		return core.AppRules{Mode: a.Mode, Names: a.Exclude}
+	}
+	return core.AppRules{}
+}
+
+func uniqueNames(names []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[strings.ToLower(n)] {
+			continue
+		}
+		seen[strings.ToLower(n)] = true
+		out = append(out, n)
+	}
+	return out
 }
 
 // ---------- Исключения ----------

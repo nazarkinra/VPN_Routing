@@ -34,7 +34,7 @@ func TestXrayAcceptsConfigs(t *testing.T) {
 		}
 		for _, tun := range tuns {
 			cfg, err := core.BuildConfig(link, "93.184.216.34", "192.168.0.1", []string{"example.org", "195.19.0.0/16"}, core.AllBuiltins(),
-				&core.BmstuRoute{Port: 41234, User: "u", Password: "p"}, tun)
+				&core.BmstuRoute{Port: 41234, User: "u", Password: "p"}, core.AppRules{}, tun)
 			if err != nil {
 				t.Fatal(err)
 			}

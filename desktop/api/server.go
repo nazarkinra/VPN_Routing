@@ -100,6 +100,21 @@ func (s *Server) routes() http.Handler {
 		s.reloadIfConnected()
 		return map[string]string{"message": "Встроенные правила возвращены"}, nil
 	}))
+	// Маршрутизация по приложениям: режим и списки; запущенные программы для выбора
+	api("/api/apps/set", s.post(func(r *http.Request) (any, error) {
+		a, err := decode[app.Apps](r)
+		if err != nil {
+			return nil, err
+		}
+		s.Store.SetApps(a)
+		if s.VPN.Running() {
+			s.VPN.Reload()
+		}
+		return nil, nil
+	}))
+	api("/api/apps/processes", func(_ *http.Request) (any, error) {
+		return map[string]any{"processes": app.Processes()}, nil
+	})
 	api("/api/update/check", s.post(s.checkUpdate))
 	api("/api/update/skip", s.post(s.skipUpdate))
 	api("/api/update/install", s.post(s.installUpdate))
@@ -205,6 +220,7 @@ func (s *Server) state(_ *http.Request) (any, error) {
 		Pinging:    s.Servers.AnyPinging(),
 		Bmstu:      s.bmstuView(),
 		Direct:     s.directView(),
+		Apps:       s.Store.Apps(),
 		Prefs:      s.Store.Prefs(),
 		Autostart:  s.autostart(false),
 		Update:     s.Updater.Status(),

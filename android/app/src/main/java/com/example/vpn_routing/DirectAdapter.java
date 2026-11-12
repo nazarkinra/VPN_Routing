@@ -26,12 +26,17 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
 
         /** Отключить встроенное правило (домен, как в RoutingRules); title — как он показан. */
         void onRemoveBuiltin(String domain, String title);
+
+        /** Открыть маршрутизацию по приложениям. */
+        void onApps();
     }
 
     static final int TYPE_INTRO = 0;
     static final int TYPE_SECTION = 1;
     static final int TYPE_ENTRY = 2;
     static final int TYPE_EMPTY = 3;
+    /** Карточка «Приложения»: открывает маршрутизацию по приложениям. */
+    static final int TYPE_APPS = 4;
 
     /** Строка списка. */
     static final class Row {
@@ -67,10 +72,16 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
 
     /** Пересобрать список; query — строка поиска (пустая — показать всё). */
     void submit(List<String> userItems, boolean bmstuEnabled, List<String> directDomains,
-                List<String> tunnelDomains, String query) {
+                List<String> tunnelDomains, String appsTitle, String appsSubtitle, String query) {
         String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         rows.clear();
-        if (q.isEmpty()) rows.add(new Row(TYPE_INTRO, null, null, 0, null, 0));
+        if (q.isEmpty()) {
+            rows.add(new Row(TYPE_INTRO, null, null, 0, null, 0));
+            rows.add(new Row(TYPE_SECTION, null, "", R.string.apps_section, null, 0));
+            Row apps = new Row(TYPE_APPS, appsTitle, appsSubtitle, R.drawable.ic_apps, null, R.color.accent);
+            apps.first = apps.last = true;
+            rows.add(apps);
+        }
 
         List<Row> user = new ArrayList<>();
         for (String item : userItems) {
@@ -256,13 +267,27 @@ final class DirectAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
             iconBg.setBackgroundTintList(ColorStateList.valueOf(row.tint != 0
                     ? androidx.core.graphics.ColorUtils.setAlphaComponent(tint, 40)
                     : ContextCompat.getColor(itemView.getContext(), R.color.surface_variant)));
+            itemView.setBackground(GroupBackground.create(itemView.getContext(), row.first, row.last));
+            if (row.type == TYPE_APPS) {
+                // Карточка-ссылка: стрелка вместо замка, нажатие открывает экран приложений
+                action.setVisibility(View.VISIBLE);
+                action.setImageResource(R.drawable.ic_arrow_forward);
+                action.setContentDescription(row.title);
+                action.setOnClickListener(v -> callbacks.onApps());
+                lock.setVisibility(View.GONE);
+                itemView.setOnClickListener(v -> callbacks.onApps());
+                return;
+            }
+            itemView.setOnClickListener(null);
+            itemView.setClickable(false);
+            action.setImageResource(R.drawable.ic_delete);
+            action.setContentDescription(itemView.getContext().getString(R.string.remove));
             boolean removable = row.removable != null;
             action.setVisibility(removable ? View.VISIBLE : View.GONE);
             lock.setVisibility(removable ? View.GONE : View.VISIBLE);
             action.setOnClickListener(!removable ? null : row.builtin
                     ? v -> callbacks.onRemoveBuiltin(row.removable, row.title)
                     : v -> callbacks.onRemove(row.removable));
-            itemView.setBackground(GroupBackground.create(itemView.getContext(), row.first, row.last));
         }
     }
 }

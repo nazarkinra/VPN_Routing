@@ -1,0 +1,312 @@
+package com.example.vpn_routing;
+
+import android.Manifest;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.graphics.drawable.Drawable;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.LayoutInflater;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.CheckBox;
+import android.widget.ImageView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SearchView;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.button.MaterialButtonToggleGroup;
+
+import java.text.Collator;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Маршрутизация по приложениям (как в Happ): все приложения по правилам VPN, только выбранные по правилам
+ * (остальные напрямую) или все, кроме выбранных (выбранные напрямую). У каждого режима свой список.
+ * Изменения сохраняются сразу, туннель пересоздаётся при уходе с экрана.
+ */
+public class AppsActivity extends AppCompatActivity {
+
+    private static final ExecutorService io = Executors.newSingleThreadExecutor();
+
+    /** Установленное приложение с доступом в интернет. */
+    static final class App {
+        final String pkg;
+        final String label;
+        /** Системное без значка в меню приложений (по умолчанию скрыто). */
+        final boolean hiddenSystem;
+
+        App(String pkg, String label, boolean hiddenSystem) {
+            this.pkg = pkg;
+            this.label = label;
+            this.hiddenSystem = hiddenSystem;
+        }
+    }
+
+    private Settings settings;
+    private String mode;
+    private final Set<String> include = new LinkedHashSet<>();
+    private final Set<String> exclude = new LinkedHashSet<>();
+    private boolean changed;
+    private boolean showSystem;
+    private String query = "";
+    private List<App> apps = new ArrayList<>();
+
+    private TextView hint;
+    private View progress;
+    private Adapter adapter;
+    private final Map<String, Drawable> icons = new HashMap<>();
+    private final Handler main = new Handler(Looper.getMainLooper());
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_apps);
+        settings = new Settings(this);
+        mode = settings.getAppsMode();
+        include.addAll(settings.getApps(Settings.APPS_INCLUDE));
+        exclude.addAll(settings.getApps(Settings.APPS_EXCLUDE));
+
+        MaterialToolbar toolbar = findViewById(R.id.toolbar);
+        toolbar.setNavigationOnClickListener(v -> finish());
+        toolbar.inflateMenu(R.menu.apps);
+        toolbar.setOnMenuItemClickListener(this::onMenu);
+        SearchView search = (SearchView) toolbar.getMenu().findItem(R.id.action_search).getActionView();
+        search.setQueryHint("Название приложения");
+        search.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String q) {
+                return true;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String q) {
+                query = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
+                render();
+                return true;
+            }
+        });
+
+        hint = findViewById(R.id.modeHint);
+        progress = findViewById(R.id.progress);
+        MaterialButtonToggleGroup group = findViewById(R.id.modeGroup);
+        group.check(Settings.APPS_INCLUDE.equals(mode) ? R.id.modeInclude
+                : Settings.APPS_EXCLUDE.equals(mode) ? R.id.modeExclude : R.id.modeAll);
+        group.addOnButtonCheckedListener((g, id, checked) -> {
+            if (!checked) return;
+            mode = id == R.id.modeInclude ? Settings.APPS_INCLUDE
+                    : id == R.id.modeExclude ? Settings.APPS_EXCLUDE : Settings.APPS_ALL;
+            save();
+            render();
+        });
+
+        RecyclerView list = findViewById(R.id.list);
+        list.setLayoutManager(new LinearLayoutManager(this));
+        adapter = new Adapter();
+        list.setAdapter(adapter);
+        render();
+        load();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Список приложений задаётся при создании туннеля: пересоздать его один раз, после всех отметок
+        if (changed) {
+            changed = false;
+            RoutingVpnService.send(this, RoutingVpnService.ACTION_RELOAD_APPS);
+        }
+    }
+
+    private boolean onMenu(MenuItem item) {
+        if (item.getItemId() == R.id.action_system) {
+            showSystem = !item.isChecked();
+            item.setChecked(showSystem);
+            render();
+        } else if (item.getItemId() == R.id.action_clear) {
+            Set<String> set = selectedSet();
+            if (set != null) {
+                set.clear();
+                save();
+                render();
+            }
+        }
+        return true;
+    }
+
+    /** Список установленных приложений с доступом в интернет — в фоне: подписи читаются долго. */
+    private void load() {
+        io.execute(() -> {
+            PackageManager pm = getPackageManager();
+            List<App> result = new ArrayList<>();
+            for (ApplicationInfo info : pm.getInstalledApplications(0)) {
+                if (info.packageName.equals(getPackageName())) continue;
+                if (pm.checkPermission(Manifest.permission.INTERNET, info.packageName)
+                        != PackageManager.PERMISSION_GRANTED) continue;
+                boolean system = (info.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+                boolean launcher = pm.getLaunchIntentForPackage(info.packageName) != null;
+                result.add(new App(info.packageName, String.valueOf(pm.getApplicationLabel(info)), system && !launcher));
+            }
+            Collator collator = Collator.getInstance(new Locale("ru"));
+            result.sort((a, b) -> collator.compare(a.label, b.label));
+            main.post(() -> {
+                if (isFinishing()) return;
+                apps = result;
+                progress.setVisibility(View.GONE);
+                render();
+            });
+        });
+    }
+
+    private Set<String> selectedSet() {
+        return Settings.APPS_INCLUDE.equals(mode) ? include : Settings.APPS_EXCLUDE.equals(mode) ? exclude : null;
+    }
+
+    private void save() {
+        settings.setApps(mode, new ArrayList<>(include), new ArrayList<>(exclude));
+        changed = true;
+    }
+
+    private void toggle(App app) {
+        Set<String> set = selectedSet();
+        if (set == null) {
+            Toast.makeText(this, "Сначала выберите режим: «Только выбранные» или «Кроме выбранных»",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!set.remove(app.pkg)) set.add(app.pkg);
+        save();
+        render();
+    }
+
+    private void render() {
+        hint.setText(Settings.APPS_INCLUDE.equals(mode) ? R.string.apps_hint_include
+                : Settings.APPS_EXCLUDE.equals(mode) ? R.string.apps_hint_exclude : R.string.apps_hint_all);
+        Set<String> set = selectedSet();
+        List<App> selected = new ArrayList<>();
+        List<App> other = new ArrayList<>();
+        for (App a : apps) {
+            boolean on = set != null && set.contains(a.pkg);
+            if (!on && a.hiddenSystem && !showSystem) continue;
+            if (!query.isEmpty() && !a.label.toLowerCase(Locale.ROOT).contains(query)
+                    && !a.pkg.toLowerCase(Locale.ROOT).contains(query)) continue;
+            (on ? selected : other).add(a);
+        }
+        adapter.submit(selected, other, set);
+    }
+
+    // ---------- Список ----------
+
+    private static final int TYPE_SECTION = 0;
+    private static final int TYPE_APP = 1;
+
+    private static final class Row {
+        final int type;
+        final App app;
+        final String title;
+        final String count;
+        boolean first, last;
+
+        Row(int type, App app, String title, String count) {
+            this.type = type;
+            this.app = app;
+            this.title = title;
+            this.count = count;
+        }
+    }
+
+    private final class Adapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+        private final List<Row> rows = new ArrayList<>();
+        private Set<String> selected;
+
+        void submit(List<App> on, List<App> off, Set<String> selected) {
+            this.selected = selected;
+            rows.clear();
+            group(getString(R.string.apps_selected), on);
+            group(getString(selected == null && on.isEmpty() ? R.string.apps_title : R.string.apps_other), off);
+            notifyDataSetChanged();
+        }
+
+        private void group(String title, List<App> items) {
+            if (items.isEmpty()) return;
+            rows.add(new Row(TYPE_SECTION, null, title, String.valueOf(items.size())));
+            int start = rows.size();
+            for (App a : items) rows.add(new Row(TYPE_APP, a, null, null));
+            rows.get(start).first = true;
+            rows.get(rows.size() - 1).last = true;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return rows.get(position).type;
+        }
+
+        @Override
+        public int getItemCount() {
+            return rows.size();
+        }
+
+        @NonNull
+        @Override
+        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            LayoutInflater inf = LayoutInflater.from(parent.getContext());
+            if (viewType == TYPE_SECTION) {
+                return new RecyclerView.ViewHolder(inf.inflate(R.layout.item_section, parent, false)) {
+                };
+            }
+            return new RecyclerView.ViewHolder(inf.inflate(R.layout.item_app, parent, false)) {
+            };
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            Row row = rows.get(position);
+            View v = holder.itemView;
+            if (row.type == TYPE_SECTION) {
+                ((TextView) v.findViewById(R.id.sectionTitle)).setText(row.title);
+                ((TextView) v.findViewById(R.id.sectionCount)).setText(row.count);
+                return;
+            }
+            App app = row.app;
+            ((TextView) v.findViewById(R.id.appName)).setText(app.label);
+            ((TextView) v.findViewById(R.id.appPackage)).setText(app.pkg);
+            CheckBox check = v.findViewById(R.id.appCheck);
+            check.setChecked(selected != null && selected.contains(app.pkg));
+            check.setEnabled(selected != null);
+            v.setAlpha(selected == null ? 0.6f : 1f);
+            ImageView icon = v.findViewById(R.id.appIcon);
+            icon.setImageDrawable(icon(app.pkg));
+            v.setOnClickListener(x -> toggle(app));
+            v.setBackground(GroupBackground.create(v.getContext(), row.first, row.last));
+        }
+    }
+
+    private Drawable icon(String pkg) {
+        Drawable d = icons.get(pkg);
+        if (d == null) {
+            try {
+                d = getPackageManager().getApplicationIcon(pkg);
+            } catch (PackageManager.NameNotFoundException e) {
+                d = getPackageManager().getDefaultActivityIcon();
+            }
+            icons.put(pkg, d);
+        }
+        return d;
+    }
+}

@@ -41,6 +41,50 @@ public final class Settings {
         }
     }
 
+    // ---------- Маршрутизация по приложениям ----------
+
+    /** Все приложения идут по правилам VPN. */
+    public static final String APPS_ALL = "all";
+    /** По правилам идут только выбранные приложения, остальные — напрямую (мимо туннеля). */
+    public static final String APPS_INCLUDE = "include";
+    /** Выбранные приложения идут напрямую, остальные — по правилам. */
+    public static final String APPS_EXCLUDE = "exclude";
+
+    private static final String KEY_APPS_MODE = "apps_mode";
+    private static final String KEY_APPS_INCLUDE = "apps_include";
+    private static final String KEY_APPS_EXCLUDE = "apps_exclude";
+
+    public String getAppsMode() {
+        String mode = prefs.getString(KEY_APPS_MODE, APPS_ALL);
+        return APPS_INCLUDE.equals(mode) || APPS_EXCLUDE.equals(mode) ? mode : APPS_ALL;
+    }
+
+    /** Пакеты приложений для режима (у каждого режима свой список: при переключении выбор не теряется). */
+    public List<String> getApps(String mode) {
+        String key = APPS_INCLUDE.equals(mode) ? KEY_APPS_INCLUDE : APPS_EXCLUDE.equals(mode) ? KEY_APPS_EXCLUDE : null;
+        List<String> result = new ArrayList<>();
+        if (key == null) return result;
+        try {
+            JSONArray array = new JSONArray(prefs.getString(key, "[]"));
+            for (int i = 0; i < array.length(); i++) result.add(array.getString(i));
+        } catch (JSONException ignored) {
+        }
+        return result;
+    }
+
+    public void setApps(String mode, List<String> include, List<String> exclude) {
+        prefs.edit()
+                .putString(KEY_APPS_MODE, mode)
+                .putString(KEY_APPS_INCLUDE, new JSONArray(include).toString())
+                .putString(KEY_APPS_EXCLUDE, new JSONArray(exclude).toString())
+                .apply();
+    }
+
+    /** Список действующего режима (пустой при «все приложения»). */
+    public List<String> getActiveApps() {
+        return getApps(getAppsMode());
+    }
+
     public List<String> getExceptions() {
         List<String> result = new ArrayList<>();
         try {

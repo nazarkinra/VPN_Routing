@@ -32,7 +32,7 @@ func mustLink(t *testing.T, url string) *ProxyLink {
 func buildMap(t *testing.T, url string, bmstu *BmstuRoute) map[string]any {
 	t.Helper()
 	s, err := BuildConfig(mustLink(t, url), "93.184.216.34", "192.168.0.1",
-		[]string{"bmstu.example", "195.19.0.0/16"}, AllBuiltins(), bmstu, testTun)
+		[]string{"bmstu.example", "195.19.0.0/16"}, AllBuiltins(), bmstu, AppRules{}, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestBuiltinCoverage(t *testing.T) {
 
 func TestXrayConfigHasNoDuplicateDomains(t *testing.T) {
 	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "",
-		[]string{"ya.ru", "example.com", "sub.example.com"}, AllBuiltins(), nil, testTun)
+		[]string{"ya.ru", "example.com", "sub.example.com"}, AllBuiltins(), nil, AppRules{}, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestHysteriaRejectsPortHopping(t *testing.T) {
 func TestHysteriaOutbound(t *testing.T) {
 	l := mustLink(t, "hysteria2://AUTH@cdn.example.com:443/?sni=cdn.example.com&obfs=salamander"+
 		"&obfs-password=pw&pinSHA256=abcd&fm=%7B%22quicParams%22%3A%7B%22keepAlivePeriod%22%3A10%7D%7D#G")
-	s, err := BuildConfig(l, "93.184.216.34", "", nil, AllBuiltins(), nil, testTun)
+	s, err := BuildConfig(l, "93.184.216.34", "", nil, AllBuiltins(), nil, AppRules{}, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestWithoutRemovesDisabledBuiltins(t *testing.T) {
 
 func TestConfigWithoutDisabledZone(t *testing.T) {
 	b := Builtins{Direct: Without(DirectDomains, []string{"ru"}), Tunnel: DirectTunnelDomains}
-	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "", nil, b, nil, testTun)
+	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "", nil, b, nil, AppRules{}, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func TestConfigWithoutDisabledZone(t *testing.T) {
 
 func TestConfigWithAllBuiltinsRemoved(t *testing.T) {
 	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "", nil,
-		Builtins{}, nil, testTun)
+		Builtins{}, nil, AppRules{}, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ const corpKey = "vless://11111111-2222-3333-4444-555555555555@srv.example.com:44
 
 func corpConfig(t *testing.T, localDNS string, bmstu *BmstuRoute) (string, map[string]any) {
 	t.Helper()
-	s, err := BuildConfig(mustLink(t, corpKey), "203.0.113.10", localDNS, nil, AllBuiltins(), bmstu, testTun)
+	s, err := BuildConfig(mustLink(t, corpKey), "203.0.113.10", localDNS, nil, AllBuiltins(), bmstu, AppRules{}, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,10 +525,101 @@ func TestDumpHidesSecrets(t *testing.T) {
 	}
 }
 
+func appsConfig(t *testing.T, link *ProxyLink, apps AppRules) []map[string]any {
+	t.Helper()
+	s, err := BuildConfig(link, "203.0.113.10", "195.19.33.202", nil, AllBuiltins(),
+		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, apps, testTun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal([]byte(s), &m)
+	var rules []map[string]any
+	for _, r := range get(m, "routing", "rules").([]any) {
+		rules = append(rules, r.(map[string]any))
+	}
+	return rules
+}
+
+func hasProcess(r map[string]any, name string) bool {
+	list, _ := r["process"].([]any)
+	for _, v := range list {
+		if v == name {
+			return true
+		}
+	}
+	return false
+}
+
+// «Кроме выбранных»: выбранные программы — сразу напрямую, до МГТУ и остальных правил.
+func TestAppsExclude(t *testing.T) {
+	rules := appsConfig(t, mustLink(t, corpKey), AppRules{Mode: AppsExclude, Names: []string{"Telegram.exe"}})
+	first := -1
+	for i, r := range rules {
+		if hasProcess(r, "Telegram.exe") {
+			if r["outboundTag"] != "direct" {
+				t.Fatalf("исключённые приложения — напрямую, а не %v", r["outboundTag"])
+			}
+			if !hasProcess(r, "telegram.exe") {
+				t.Error("нет варианта имени в нижнем регистре")
+			}
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		t.Fatal("нет правила по процессам")
+	}
+	for i, r := range rules {
+		if r["outboundTag"] == "bmstu" && i < first {
+			t.Error("правило МГТУ раньше исключения приложений")
+		}
+		if r["outboundTag"] == "dns-out" && i > first {
+			t.Error("перехват DNS должен идти раньше правил по приложениям")
+		}
+	}
+}
+
+// «Только выбранные»: правила — с условием процесса, выбранные по умолчанию — через VPN, прочие — напрямую.
+func TestAppsInclude(t *testing.T) {
+	rules := appsConfig(t, mustLink(t, corpKey), AppRules{Mode: AppsInclude, Names: []string{"firefox"}})
+	n := len(rules)
+	last, prev := rules[n-1], rules[n-2]
+	if last["outboundTag"] != "direct" || last["process"] != nil || last["network"] != "tcp,udp" {
+		t.Fatalf("последнее правило — всё остальное напрямую: %v", last)
+	}
+	if prev["outboundTag"] != "proxy" || !hasProcess(prev, "firefox") {
+		t.Fatalf("выбранные по умолчанию — через VPN: %v", prev)
+	}
+	for _, r := range rules[:n-2] {
+		switch r["outboundTag"] {
+		case "bmstu", "block":
+			if !hasProcess(r, "firefox") {
+				t.Errorf("правило %v без условия процесса", r)
+			}
+		case "dns-out":
+			if r["process"] != nil {
+				t.Error("перехват DNS — для всех приложений")
+			}
+		}
+	}
+	// Без основного VPN выбранные по умолчанию — тоже напрямую
+	rules = appsConfig(t, nil, AppRules{Mode: AppsInclude, Names: []string{"firefox"}})
+	if r := rules[len(rules)-2]; r["outboundTag"] != "direct" {
+		t.Fatalf("без основного VPN выхода proxy нет: %v", r)
+	}
+	// Пустой список — как «все приложения»
+	for _, r := range appsConfig(t, mustLink(t, corpKey), AppRules{Mode: AppsInclude}) {
+		if r["process"] != nil {
+			t.Fatal("пустой список не должен добавлять правил по процессам")
+		}
+	}
+}
+
 // Только МГТУ: основного сервера нет, bmstu.ru — в туннель, остальное и DNS — напрямую.
 func TestCorpOnlyConfig(t *testing.T) {
 	s, err := BuildConfig(nil, "", "195.19.33.202", []string{"example.org"}, AllBuiltins(),
-		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, testTun)
+		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, AppRules{}, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
