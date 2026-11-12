@@ -160,7 +160,8 @@ func (t *settingsTab) update(st *api.State, force bool) {
 		t.dnsLeakRow.Show()
 	} else {
 		t.autostart.Text = "Запускать при загрузке (служба systemd)"
-		t.autoHint.SetText("Служба vpnrouting.service, как bmstu-vpn на Raspberry Pi. VPN работает и без открытого окна.")
+		t.autoHint.SetText("Служба vpnrouting.service, как bmstu-vpn на Raspberry Pi: VPN работает и без открытого окна. " +
+			"Значок в трее появляется при входе в систему.")
 		t.dnsLeakRow.Hide()
 	}
 	t.autostart.Refresh()

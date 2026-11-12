@@ -34,7 +34,7 @@ import (
 // Options — как запускать окно.
 type Options struct {
 	Client *api.Client
-	// Tray — значок в трее; закрытие окна прячет его (Windows: VPN работает в этом же процессе).
+	// Tray — значок в трее; закрытие окна прячет его (Windows и Linux).
 	Tray bool
 	// Hidden — не показывать окно при запуске (автозапуск при входе в систему).
 	Hidden bool
@@ -46,6 +46,8 @@ type Options struct {
 	Service bool
 	// OnServiceVersion — версия службы (вызывается при каждом ответе; окно сравнивает со своей).
 	OnServiceVersion func(version string)
+	// OnState — каждый ответ службы (Linux: значок в трее при входе в систему — вместе с автозапуском).
+	OnState func(st *api.State)
 }
 
 // UI — окно приложения.
@@ -178,6 +180,9 @@ func (u *UI) apply(st *api.State, err error) {
 	u.stMu.Unlock()
 	if u.o.OnServiceVersion != nil && st.Version != "" {
 		u.o.OnServiceVersion(st.Version)
+	}
+	if u.o.OnState != nil {
+		u.o.OnState(st)
 	}
 	u.render(false)
 	if !u.toastAt.IsZero() && time.Since(u.toastAt) > 4*time.Second {
@@ -329,7 +334,7 @@ func (u *UI) installUpdate() {
 	u.act("/api/update/install", nil, "Загрузка обновления…", func(*api.Result) { u.tabs.SelectIndex(3) })
 }
 
-// ---------- Трей (Windows) ----------
+// ---------- Трей (Windows; Linux — StatusNotifierItem, в GNOME через расширение AppIndicator) ----------
 
 func (u *UI) setupTray() {
 	desk, ok := u.app.(desktop.App)

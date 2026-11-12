@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -30,15 +31,35 @@ func launch(dir string, _ []string, flags map[string]bool) {
 		c.Close()
 		return
 	}
+	// Масштаб окна — как у остальных программ (системная настройка, например 125%), а не по DPI экрана
+	applyDesktopScale()
+	hidden := flags["hidden"] || flags["autostart"]
 	c := client(dir)
-	if _, err := c.State(); err != nil && install.ServiceInstalled() {
+	// При входе в систему (--hidden) служба не запускается: systemctl start спросил бы пароль
+	if _, err := c.State(); err != nil && install.ServiceInstalled() && !hidden {
 		go func() { _ = startService() }()
 	}
 	var start func() error
 	if install.ServiceInstalled() {
 		start = startService
 	}
-	ui := gui.New(gui.Options{Client: c, StartService: start})
+	var ui *gui.UI
+	ui = gui.New(gui.Options{
+		Client:       c,
+		StartService: start,
+		// Значок в трее (GNOME — через расширение AppIndicator, в Ubuntu оно включено); закрытие окна
+		// прячет его в трей, VPN работает в службе и без окна
+		Tray:    true,
+		Hidden:  hidden,
+		Service: true,
+		// «Выход» в трее: выключить VPN и закрыть окно; служба остаётся для следующего запуска
+		OnQuit: func() {
+			_, _ = c.Do("/api/vpn/disconnect", nil)
+			ui.Quit()
+		},
+		// Значок в трее при входе в систему — вместе с автозапуском службы
+		OnState: func(st *api.State) { syncTrayAutostart(st.Autostart.Enabled) },
+	})
 	if ln, err := net.Listen("unix", lock); err == nil {
 		go func() {
 			for {
@@ -75,6 +96,43 @@ func runService(dir string, flags map[string]bool) {
 	case <-b.quitCh:
 	}
 	b.shutdown()
+}
+
+var trayAutostartDone *bool
+
+// syncTrayAutostart — ~/.config/autostart/vpnrouting.desktop: при входе в систему окно запускается
+// скрытым, со значком в трее. Есть, только пока включён автозапуск службы.
+func syncTrayAutostart(enabled bool) {
+	if trayAutostartDone != nil && *trayAutostartDone == enabled {
+		return
+	}
+	trayAutostartDone = &enabled
+	dir, err := os.UserConfigDir()
+	if err != nil || !install.Installed() {
+		return
+	}
+	path := filepath.Join(dir, "autostart", "vpnrouting.desktop")
+	if !enabled {
+		_ = os.Remove(path)
+		return
+	}
+	entry := strings.Join([]string{
+		"[Desktop Entry]",
+		"Type=Application",
+		"Name=VPN routing",
+		"Comment=Значок VPN routing в трее",
+		"Exec=" + install.BinPath + " --hidden",
+		"Icon=vpnrouting",
+		"Terminal=false",
+		"NoDisplay=true",
+		"X-GNOME-Autostart-enabled=true",
+		"",
+	}, "\n")
+	if old, err := os.ReadFile(path); err == nil && string(old) == entry {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, []byte(entry), 0o644)
 }
 
 // startService — systemctl start (система может спросить пароль) и ожидание ответа службы.

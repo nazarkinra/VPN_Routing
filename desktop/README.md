@@ -47,13 +47,16 @@ sudo ./VPN_routing/install.sh
 Программа ставится в `/usr/local/bin/vpnrouting`, в меню приложений (раздел «Сеть», поиск «VPN routing»)
 появляется ярлык со значком, служба `vpnrouting.service` запускается и включается при загрузке (как
 `bmstu-vpn` на Raspberry Pi). VPN работает в службе (от root), а окно — обычная программа пользователя: ярлык
-открывает его, крестик закрывает только окно. Окно и команды `vpnrouting connect`, `disconnect`, `status`
+открывает его, крестик прячет окно в трей (в GNOME — через расширение AppIndicator, в Ubuntu оно
+включено). При включённом автозапуске значок появляется при входе в систему
+(`~/.config/autostart/vpnrouting.desktop`, окно запускается скрытым). Масштаб окна берётся из системной
+настройки (`Xft.dpi`: 125% в GNOME — 1.25), а не из DPI экрана; свой — переменная `FYNE_SCALE`. Окно и команды `vpnrouting connect`, `disconnect`, `status`
 обращаются к службе через `/run/vpnrouting/control.sock` без sudo — служба пускает root и пользователя, который
 ставил программу. Если служба остановлена, окно предложит запустить её (`systemctl start`, система может
 спросить пароль). Добавить ещё пользователя — `sudo vpnrouting install --user ИМЯ`. Удаление —
 `sudo ./VPN_routing/uninstall.sh` (`--purge` — вместе с настройками в `/var/lib/vpnrouting`).
 
-Без установки: `sudo ./vpnrouting` (служба) и в другом терминале `./vpnrouting` (окно). Значка в трее на Linux нет.
+Без установки: `sudo ./vpnrouting` (служба) и в другом терминале `./vpnrouting` (окно).
 
 Собрано в Ubuntu 24.04: нужен glibc 2.38+ (Ubuntu 24.04, Debian 13, Fedora 39, Mint 22 и новее), а также
 обычные библиотеки рабочего стола (OpenGL, X11 или Wayland) — они есть в любом дистрибутиве с графической оболочкой.
@@ -66,7 +69,7 @@ sudo ./VPN_routing/install.sh
 | `VpnService.protect()` для клиента МГТУ | сокеты OpenVPN и прямой выход прокси привязываются к физическому интерфейсу (`IP_UNICAST_IF` / `SO_BINDTODEVICE`) |
 | DNS текущей сети из `ConnectivityManager` | DNS интерфейса с маршрутом по умолчанию; при смене сети ядро перезапускается, туннель МГТУ переподключается |
 | системный DNS → `172.19.0.2` в туннеле | Windows: DNS адаптера + фильтры WFP против утечек; Linux: `resolvectl` при systemd-resolved |
-| уведомление и ярлыки «Включить/Выключить VPN» | значок в трее (Windows) и команды `vpnrouting connect / disconnect / toggle` |
+| уведомление и ярлыки «Включить/Выключить VPN» | значок в трее и команды `vpnrouting connect / disconnect / toggle` |
 | «Постоянная VPN» | «Запускать при входе» (задача планировщика) / служба systemd + «Подключаться при запуске» |
 | SharedPreferences | `settings.json`: `%APPDATA%\VPN routing` на Windows, `/var/lib/vpnrouting` на Linux (права 0600) |
 | пароль МГТУ на телефоне | на Windows шифруется DPAPI (расшифровать может только эта учётная запись) |
