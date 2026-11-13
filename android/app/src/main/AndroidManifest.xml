@@ -48,6 +48,13 @@
             android:parentActivityName=".MainActivity"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Дополнительный туннель: сервер, приложения, домены (версия 2.1) -->
+        <activity
+            android:name=".TunnelActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Передача скачанного обновления системному установщику -->
         <provider
             android:name="androidx.core.content.FileProvider"

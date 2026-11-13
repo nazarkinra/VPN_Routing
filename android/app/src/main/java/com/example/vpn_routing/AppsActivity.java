@@ -50,6 +50,12 @@ import java.util.concurrent.Executors;
  */
 public class AppsActivity extends AppCompatActivity {
 
+    /**
+     * Выбор приложений дополнительного туннеля (версия 2.1): режимов нет, отмеченные приложения целиком идут
+     * через туннель. Приложение может быть только в одном туннеле — у занятых другим видно, в каком.
+     */
+    public static final String EXTRA_TUNNEL_ID = "tunnel_id";
+
     private static final ExecutorService io = Executors.newSingleThreadExecutor();
 
     /** Установленное приложение с доступом в интернет. */
@@ -70,9 +76,14 @@ public class AppsActivity extends AppCompatActivity {
     private String mode;
     private final Set<String> include = new LinkedHashSet<>();
     private final Set<String> exclude = new LinkedHashSet<>();
+    /** Режим туннеля: id туннеля, его приложения и где заняты остальные (пакет -> название туннеля). */
+    private String tunnelId;
+    private final Set<String> tunnelApps = new LinkedHashSet<>();
+    private final Map<String, String> otherTunnels = new HashMap<>();
     private boolean changed;
     private boolean showSystem;
     private String query = "";
+    private String tunnelName = "";
     private List<App> apps = new ArrayList<>();
 
     private TextView hint;
@@ -113,6 +124,31 @@ public class AppsActivity extends AppCompatActivity {
         hint = findViewById(R.id.modeHint);
         progress = findViewById(R.id.progress);
         MaterialButtonToggleGroup group = findViewById(R.id.modeGroup);
+
+        tunnelId = getIntent().getStringExtra(EXTRA_TUNNEL_ID);
+        if (tunnelId != null) {
+            TunnelStore.Tunnel t = TunnelStore.get(this).find(tunnelId);
+            if (t == null) {
+                finish();
+                return;
+            }
+            tunnelName = t.name;
+            tunnelApps.addAll(t.apps);
+            for (TunnelStore.Tunnel other : TunnelStore.get(this).all()) {
+                if (other.id.equals(tunnelId)) continue;
+                for (String pkg : other.apps) otherTunnels.put(pkg, other.name);
+            }
+            toolbar.setTitle(getString(R.string.apps_title) + ": " + t.name);
+            group.setVisibility(View.GONE);
+            RecyclerView list = findViewById(R.id.list);
+            list.setLayoutManager(new LinearLayoutManager(this));
+            adapter = new Adapter();
+            list.setAdapter(adapter);
+            render();
+            if (needsMiuiAppsPermission()) appsPermission.launch(MIUI_GET_INSTALLED_APPS);
+            else load();
+            return;
+        }
         group.check(Settings.APPS_INCLUDE.equals(mode) ? R.id.modeInclude
                 : Settings.APPS_EXCLUDE.equals(mode) ? R.id.modeExclude : R.id.modeAll);
         group.addOnButtonCheckedListener((g, id, checked) -> {
@@ -138,7 +174,8 @@ public class AppsActivity extends AppCompatActivity {
         // Список приложений задаётся при создании туннеля: пересоздать его один раз, после всех отметок
         if (changed) {
             changed = false;
-            RoutingVpnService.send(this, RoutingVpnService.ACTION_RELOAD_APPS);
+            RoutingVpnService.send(this, tunnelId != null ? RoutingVpnService.ACTION_RELOAD_TUNNELS
+                    : RoutingVpnService.ACTION_RELOAD_APPS);
         }
     }
 
@@ -219,11 +256,18 @@ public class AppsActivity extends AppCompatActivity {
     }
 
     private Set<String> selectedSet() {
+        if (tunnelId != null) return tunnelApps;
         return Settings.APPS_INCLUDE.equals(mode) ? include : Settings.APPS_EXCLUDE.equals(mode) ? exclude : null;
     }
 
     private void save() {
-        settings.setApps(mode, new ArrayList<>(include), new ArrayList<>(exclude));
+        if (tunnelId != null) {
+            // Отмеченное здесь приложение убирается из других туннелей
+            TunnelStore.get(this).setApps(tunnelId, new ArrayList<>(tunnelApps));
+            for (String pkg : tunnelApps) otherTunnels.remove(pkg);
+        } else {
+            settings.setApps(mode, new ArrayList<>(include), new ArrayList<>(exclude));
+        }
         changed = true;
     }
 
@@ -240,7 +284,8 @@ public class AppsActivity extends AppCompatActivity {
     }
 
     private void render() {
-        hint.setText(Settings.APPS_INCLUDE.equals(mode) ? R.string.apps_hint_include
+        if (tunnelId != null) hint.setText(getString(R.string.apps_hint_tunnel, tunnelName));
+        else hint.setText(Settings.APPS_INCLUDE.equals(mode) ? R.string.apps_hint_include
                 : Settings.APPS_EXCLUDE.equals(mode) ? R.string.apps_hint_exclude : R.string.apps_hint_all);
         Set<String> set = selectedSet();
         List<App> selected = new ArrayList<>();
@@ -329,7 +374,9 @@ public class AppsActivity extends AppCompatActivity {
             }
             App app = row.app;
             ((TextView) v.findViewById(R.id.appName)).setText(app.label);
-            ((TextView) v.findViewById(R.id.appPackage)).setText(app.pkg);
+            String elsewhere = otherTunnels.get(app.pkg);
+            TextView pkgText = v.findViewById(R.id.appPackage);
+            pkgText.setText(elsewhere != null ? "сейчас в туннеле «" + elsewhere + "»" : app.pkg);
             CheckBox check = v.findViewById(R.id.appCheck);
             check.setChecked(selected != null && selected.contains(app.pkg));
             check.setEnabled(selected != null);

@@ -29,6 +29,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG_VPN = "vpn";
+    private static final String TAG_TUNNELS = "tunnels";
     private static final String TAG_CORP = "corp";
     private static final String TAG_DIRECT = "direct";
     private static final String STATE_TAB = "tab";
@@ -60,6 +61,7 @@ public class MainActivity extends AppCompatActivity {
             // Все вкладки создаются сразу и только скрываются: состояние списков сохраняется
             fm.beginTransaction()
                     .add(R.id.fragmentContainer, new VpnFragment(), TAG_VPN)
+                    .add(R.id.fragmentContainer, new TunnelsFragment(), TAG_TUNNELS)
                     .add(R.id.fragmentContainer, new CorpFragment(), TAG_CORP)
                     .add(R.id.fragmentContainer, new DirectFragment(), TAG_DIRECT)
                     .commitNow();
@@ -229,6 +231,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private static String tagFor(int itemId) {
+        if (itemId == R.id.nav_tunnels) return TAG_TUNNELS;
         if (itemId == R.id.nav_corp) return TAG_CORP;
         if (itemId == R.id.nav_direct) return TAG_DIRECT;
         return TAG_VPN;
@@ -237,7 +240,7 @@ public class MainActivity extends AppCompatActivity {
     private void show(String tag) {
         FragmentManager fm = getSupportFragmentManager();
         FragmentTransaction tx = fm.beginTransaction();
-        for (String t : new String[]{TAG_VPN, TAG_CORP, TAG_DIRECT}) {
+        for (String t : new String[]{TAG_VPN, TAG_TUNNELS, TAG_CORP, TAG_DIRECT}) {
             Fragment f = fm.findFragmentByTag(t);
             if (f == null) continue;
             if (t.equals(tag)) tx.show(f);

@@ -85,6 +85,29 @@
     <string name="shortcut_disconnect">Выключить</string>
     <string name="shortcut_disconnect_long">Выключить VPN</string>
 
+    <!-- Дополнительные туннели (версия 2.1) -->
+    <string name="tab_tunnels">Туннели</string>
+    <string name="tunnel_add">Добавить туннель</string>
+    <string name="tunnels_intro">Дополнительные туннели работают параллельно основному VPN, каждый через свой сервер. Выбранные приложения и домены уходят в свой туннель, всё остальное — по обычным правилам основного VPN. Туннели работают, пока включён основной VPN.</string>
+    <string name="tunnels_main">Основной туннель</string>
+    <string name="tunnels_extra">Дополнительные туннели</string>
+    <string name="tunnels_empty">Туннелей пока нет. Добавьте туннель, выберите для него сервер, затем приложения и домены, которые должны идти через него.</string>
+    <string name="tunnel_rename">Переименовать</string>
+    <string name="tunnel_delete">Удалить туннель</string>
+    <string name="tunnel_name">Название туннеля</string>
+    <string name="tunnel_enabled">Туннель включён</string>
+    <string name="tunnel_server">Сервер туннеля</string>
+    <string name="tunnel_server_none">Сервер не выбран</string>
+    <string name="tunnel_server_choose">Нажмите, чтобы выбрать из списка серверов на вкладке VPN</string>
+    <string name="tunnel_apps">Приложения</string>
+    <string name="tunnel_apps_choose">Выбрать приложения</string>
+    <string name="tunnel_apps_hint">Весь трафик этих приложений идёт через туннель (кроме сайтов из «Напрямую» и локальной сети)</string>
+    <string name="tunnel_domains">Домены и сети</string>
+    <string name="tunnel_domain_add">Добавить домен</string>
+    <string name="tunnel_domain_hint">Сайт с поддоменами или IP-подсеть — из любых приложений</string>
+    <string name="tunnel_note">Домены туннеля важнее правил «Напрямую»: так через туннель можно пустить и сайт в зоне .ru. Если домен есть в нескольких туннелях, срабатывает туннель с меньшим номером. Приложение может быть только в одном туннеле.</string>
+    <string name="apps_hint_tunnel">Отмеченные приложения целиком идут через туннель «%1$s». Сайты из «Напрямую» и локальная сеть у них по-прежнему идут напрямую. Приложение может быть только в одном туннеле: отметка здесь убирает его из другого.</string>
+
     <!-- Обновления и встроенные правила -->
     <string name="action_check_update">Проверить обновления</string>
     <string name="restore_builtins">Вернуть встроенные</string>

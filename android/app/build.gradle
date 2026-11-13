@@ -27,8 +27,8 @@ android {
         // Ядро Xray (libv2ray.aar) собрано под Android 7.0+
         minSdk 24
         targetSdk 32
-        versionCode 9
-        versionName "1.8"
+        versionCode 10
+        versionName "2.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -52,7 +52,8 @@ android {
         debug {
             ndk {
                 // Nox (Android 7, x86): Go-ядро под трансляцией ARM (libhoudini) падает с SIGILL
-                abiFilters 'x86'
+                // Эмулятор Android Studio (x86_64)
+                abiFilters 'x86', 'x86_64'
             }
         }
         release {

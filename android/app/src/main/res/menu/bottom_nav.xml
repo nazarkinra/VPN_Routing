@@ -5,6 +5,10 @@
         android:icon="@drawable/ic_shield"
         android:title="@string/tab_vpn" />
     <item
+        android:id="@+id/nav_tunnels"
+        android:icon="@drawable/ic_tunnel"
+        android:title="@string/tab_tunnels" />
+    <item
         android:id="@+id/nav_corp"
         android:icon="@drawable/ic_school"
         android:title="@string/tab_corp" />

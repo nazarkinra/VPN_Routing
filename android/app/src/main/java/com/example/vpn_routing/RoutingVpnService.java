@@ -19,10 +19,18 @@ import android.util.Log;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import libv2ray.CoreCallbackHandler;
 import libv2ray.CoreController;
@@ -50,6 +58,11 @@ public class RoutingVpnService extends VpnService {
     public static final String ACTION_RELOAD = "com.example.vpn_routing.RELOAD";
     /** Изменилась маршрутизация по приложениям: пересоздать туннель с новым списком приложений. */
     public static final String ACTION_RELOAD_APPS = "com.example.vpn_routing.RELOAD_APPS";
+    /**
+     * Изменились дополнительные туннели. Туннель Android тоже пересоздаётся: приложения туннелей должны
+     * попадать в него и в режимах «Только выбранные» / «Кроме выбранных».
+     */
+    public static final String ACTION_RELOAD_TUNNELS = "com.example.vpn_routing.RELOAD_TUNNELS";
     /** Применить новый ключ: при ошибке вернуть прежний (как update-vpn с восстановлением снимка). */
     public static final String ACTION_APPLY_KEY = "com.example.vpn_routing.APPLY_KEY";
     public static final String EXTRA_URL = "url";
@@ -90,6 +103,11 @@ public class RoutingVpnService extends VpnService {
     private static volatile boolean corpOn;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    /** Разрешение адресов и замер задержки серверов дополнительных туннелей. */
+    private final ExecutorService resolvers = Executors.newCachedThreadPool();
+    private static volatile int tunnelGeneration;
+    private static final int TUNNEL_PROBE_SECONDS = 10;
+    private UidFinder uidFinder;
     /** Служба уничтожена (onDestroy): оставшиеся задачи только освобождают её ресурсы. */
     private volatile boolean destroyed;
     /** Последняя команда службе (onStartCommand, главный поток): остановка не отменяет более новую. */
@@ -157,6 +175,29 @@ public class RoutingVpnService extends VpnService {
 
     private static volatile long connectedSince;
     private static volatile long lastDelay;
+
+    // ---------- Дополнительные туннели ----------
+
+    /** Состояние дополнительного туннеля для интерфейса. */
+    public static final class TunnelStatus {
+        public final boolean ok;
+        /** Задержка через сервер туннеля, мс; 0 — ещё меряется, -1 — не отвечает. */
+        public final long delay;
+        public final String text;
+
+        TunnelStatus(boolean ok, long delay, String text) {
+            this.ok = ok;
+            this.delay = delay;
+            this.text = text;
+        }
+    }
+
+    private static final Map<String, TunnelStatus> tunnelStatus = new ConcurrentHashMap<>();
+
+    /** Состояние туннеля или null, если он сейчас не запущен (основной VPN выключен или туннель выключен). */
+    public static TunnelStatus getTunnelStatus(String tunnelId) {
+        return tunnelStatus.get(tunnelId);
+    }
 
     private void setState(State newState, String newMessage) {
         // Задача уже уничтоженной службы не должна менять общее состояние (его может вести новая служба)
@@ -235,6 +276,7 @@ public class RoutingVpnService extends VpnService {
         // addDisallowedApplication на части устройств и в эмуляторах этого не гарантирует.
         bmstuvpn.Bmstuvpn.setProtector(fd -> protect((int) fd));
         connectivity = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        uidFinder = new UidFinder(connectivity);
         createChannel();
     }
 
@@ -285,7 +327,9 @@ public class RoutingVpnService extends VpnService {
                 if (core != null) restartCore("Правила обновлены");
             });
         } else if (ACTION_RELOAD_APPS.equals(action)) {
-            run(this::reloadApps);
+            run(() -> reloadApps("Приложения обновлены"));
+        } else if (ACTION_RELOAD_TUNNELS.equals(action)) {
+            run(() -> reloadApps("Туннели обновлены"));
         } else if (ACTION_BMSTU_SYNC.equals(action)) {
             run(() -> {
                 if (core != null && settings.isBmstuEnabled()) bmstu.restart();
@@ -340,6 +384,7 @@ public class RoutingVpnService extends VpnService {
         destroyed = true;
         run(() -> stopEverything(false));
         worker.shutdown();
+        resolvers.shutdown();
         bmstu.shutdown();
         if (instance == this) {
             instance = null;
@@ -347,6 +392,7 @@ public class RoutingVpnService extends VpnService {
             // Сбросить состояние сразу, не дожидаясь фонового потока (он может быть занят): службы больше нет
             mainOn = false;
             corpOn = false;
+            clearTunnelStatus();
             if (state == State.CONNECTED || state == State.CONNECTING) {
                 state = State.STOPPED;
                 message = "Отключено";
@@ -455,7 +501,7 @@ public class RoutingVpnService extends VpnService {
      * Список приложений задаётся при создании туннеля (VpnService.Builder), поэтому туннель создаётся заново:
      * новый заменяет прежний, ядро перезапускается на нём, затем прежний закрывается.
      */
-    private void reloadApps() {
+    private void reloadApps(String okMessage) {
         if (core == null) return;
         ParcelFileDescriptor old = tun;
         try {
@@ -465,7 +511,7 @@ public class RoutingVpnService extends VpnService {
             fail(e, errorText(e));
             return;
         }
-        restartCore("Приложения обновлены");
+        restartCore(okMessage);
         if (old != null && old != tun) {
             try {
                 old.close();
@@ -503,14 +549,17 @@ public class RoutingVpnService extends VpnService {
             bmstuvpn.Proxy proxy = bmstu.ensureProxy();
             route = new XrayConfig.BmstuRoute((int) proxy.port(), proxy.user(), proxy.password());
         }
+        List<XrayConfig.TunnelRoute> extra = mainOn ? resolveTunnels() : new ArrayList<>();
         String config = XrayConfig.build(link, serverIp, dns, settings.getExceptions(), route,
-                settings.getActiveDirectDomains(), settings.getActiveTunnelDomains());
+                settings.getActiveDirectDomains(), settings.getActiveTunnelDomains(), extra);
 
         stopCore();
         if (tun == null) tun = establishTun();
 
         ensureCoreEnv(this);
         CoreController controller = Libv2ray.newCoreController(new CoreCallback());
+        // Правила process (приложения дополнительных туннелей): ядро спрашивает UID владельца соединения
+        controller.registerProcessFinder(extra.isEmpty() ? null : uidFinder);
         controller.startLoop(config, tun.getFd());
         core = controller;
         appliedDns = dns;
@@ -518,8 +567,105 @@ public class RoutingVpnService extends VpnService {
         appliedServerIp = serverIp;
         appliedResolveMethod = resolved == null ? null : resolved.method;
         Log.i(TAG, "Xray started: " + (link == null ? "без основного VPN" : link.describe() + " via " + serverIp)
-                + (route != null ? ", BMSTU" : "") + ", local DNS " + dns);
+                + (route != null ? ", BMSTU" : "") + ", tunnels " + extra.size() + ", local DNS " + dns);
         ConfigDump.save(this, config);
+        if (!mainOn) clearTunnelStatus();
+    }
+
+    /**
+     * Дополнительные туннели для конфига: включённые, с сервером и правилами. Адреса серверов разрешаются
+     * параллельно. Туннель, чей сервер не найден, пропускается: его приложения и домены идут по правилам
+     * основного VPN, а на вкладке «Туннели» видна ошибка.
+     */
+    private List<XrayConfig.TunnelRoute> resolveTunnels() {
+        // После onDestroy пул разрешения адресов закрыт, а общее состояние туннелей принадлежит новой службе
+        if (destroyed) return new ArrayList<>();
+        try {
+            return resolveTunnelsInternal();
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            Log.w(TAG, "service destroyed while starting tunnels");
+            return new ArrayList<>();
+        }
+    }
+
+    private List<XrayConfig.TunnelRoute> resolveTunnelsInternal() {
+        List<TunnelStore.Tunnel> all = TunnelStore.get(this).all();
+        Map<String, TunnelStatus> status = new LinkedHashMap<>();
+        Map<TunnelStore.Tunnel, Future<ServerResolver.Result>> lookups = new LinkedHashMap<>();
+        Network net = physicalNetwork();
+        for (TunnelStore.Tunnel t : all) {
+            if (!t.isActive()) continue;
+            ProxyLink l = t.link();
+            lookups.put(t, resolvers.submit(() -> ServerResolver.resolve(l.server, net)));
+        }
+        List<XrayConfig.TunnelRoute> routes = new ArrayList<>();
+        PackageManager pm = getPackageManager();
+        int index = 0;
+        for (TunnelStore.Tunnel t : all) {
+            index++;
+            Future<ServerResolver.Result> f = lookups.get(t);
+            if (f == null) continue;
+            ProxyLink l = t.link();
+            String ip;
+            try {
+                ip = f.get(20, TimeUnit.SECONDS).ip;
+            } catch (Exception e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                Log.w(TAG, "tunnel " + t.name + ": " + cause);
+                status.put(t.id, new TunnelStatus(false, -1, "Адрес сервера не найден: " + errorText(cause)
+                        + ". Трафик туннеля идёт через основной VPN."));
+                continue;
+            }
+            Set<Integer> uids = new HashSet<>();
+            for (String pkg : t.apps) {
+                try {
+                    uids.add(pm.getApplicationInfo(pkg, 0).uid);
+                } catch (PackageManager.NameNotFoundException e) {
+                    Log.i(TAG, "tunnel app not installed: " + pkg);
+                }
+            }
+            routes.add(new XrayConfig.TunnelRoute("tunnel-" + index, l, ip, uids, t.domains));
+            status.put(t.id, new TunnelStatus(true, 0, "Проверка сервера…"));
+            Log.i(TAG, "tunnel-" + index + " " + t.name + ": " + l.describe() + " via " + ip + ", apps "
+                    + uids.size() + ", domains " + t.domains.size());
+        }
+        if (destroyed) return new ArrayList<>();
+        tunnelStatus.clear();
+        tunnelStatus.putAll(status);
+        measureTunnels(all, routes);
+        return routes;
+    }
+
+    /** Задержка до серверов туннелей (реальный запрос через каждый сервер, как пинг серверов). */
+    private void measureTunnels(List<TunnelStore.Tunnel> all, List<XrayConfig.TunnelRoute> routes) {
+        int generation = ++tunnelGeneration;
+        for (XrayConfig.TunnelRoute r : routes) {
+            TunnelStore.Tunnel t = all.get(Integer.parseInt(r.tag.substring("tunnel-".length())) - 1);
+            // Замер в ядре без тайм-аута: до недоступного сервера он может висеть долго
+            Future<Long> probe = resolvers.submit(() -> {
+                ensureCoreEnv(this);
+                return Libv2ray.measureOutboundDelay(XrayConfig.buildPing(r.link, r.serverIp), DELAY_TEST_URL);
+            });
+            resolvers.execute(() -> {
+                long ms;
+                try {
+                    ms = probe.get(TUNNEL_PROBE_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    probe.cancel(true);
+                    ms = -1;
+                }
+                if (destroyed || generation != tunnelGeneration || !tunnelStatus.containsKey(t.id)) return;
+                tunnelStatus.put(t.id, ms > 0
+                        ? new TunnelStatus(true, ms, "Работает · " + ms + " мс")
+                        : new TunnelStatus(false, -1, "Сервер не отвечает — сайты туннеля не откроются"));
+                notifyListeners(false);
+            });
+        }
+    }
+
+    private void clearTunnelStatus() {
+        tunnelGeneration++;
+        tunnelStatus.clear();
     }
 
     /** Физическая сеть (Wi-Fi или мобильная), не наш VPN; null — пусть решает система. */
@@ -572,7 +718,15 @@ public class RoutingVpnService extends VpnService {
      */
     private void applyApps(Builder builder) {
         String mode = settings.getAppsMode();
-        List<String> selected = settings.getActiveApps();
+        List<String> selected = new ArrayList<>(settings.getActiveApps());
+        // Приложения дополнительных туннелей должны попадать в туннель Android при любом режиме:
+        // в «Только выбранных» они добавляются к выбранным, в «Кроме выбранных» не исключаются
+        List<String> tunnelApps = mainOn ? TunnelStore.get(this).activeApps() : new ArrayList<>();
+        if (Settings.APPS_INCLUDE.equals(mode) && !selected.isEmpty()) {
+            for (String pkg : tunnelApps) if (!selected.contains(pkg)) selected.add(pkg);
+        } else if (Settings.APPS_EXCLUDE.equals(mode)) {
+            selected.removeAll(tunnelApps);
+        }
         int added = 0;
         if (Settings.APPS_INCLUDE.equals(mode) && !selected.isEmpty()) {
             // В туннеле — только выбранные (себя среди разрешённых нет, значит, и мы вне туннеля)
@@ -635,6 +789,8 @@ public class RoutingVpnService extends VpnService {
                 settings.setMainOn(false);
                 settings.setBmstuEnabled(false);
             }
+            // Состояние туннелей тоже общее (статическое): уничтоженная служба его не трогает
+            clearTunnelStatus();
         }
         appliedLink = null;
         bmstu.stopAll();

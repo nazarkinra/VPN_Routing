@@ -42,6 +42,31 @@ public final class XrayConfig {
     }
 
     /**
+     * Дополнительный туннель (версия 2.1): свой сервер, параллельный основному. В него идут приложения
+     * (по UID, который ядро узнаёт через ProcessFinder) и домены или подсети.
+     */
+    public static final class TunnelRoute {
+        /** Тег выхода в конфиге: tunnel-1, tunnel-2, … */
+        final String tag;
+        final ProxyLink link;
+        final String serverIp;
+        /** UID приложений туннеля (строки: так их сравнивает правило process). */
+        final List<String> uids;
+        /** Домены и подсети туннеля (как исключения: example.com, 10.0.0.0/8). */
+        final List<String> domains;
+
+        public TunnelRoute(String tag, ProxyLink link, String serverIp, Collection<Integer> uids,
+                           Collection<String> domains) {
+            this.tag = tag;
+            this.link = link;
+            this.serverIp = serverIp;
+            this.uids = new ArrayList<>();
+            for (Integer uid : new LinkedHashSet<>(uids)) this.uids.add(String.valueOf(uid));
+            this.domains = new ArrayList<>(domains);
+        }
+    }
+
+    /**
      * @param link       разобранная ссылка vless://
      * @param serverIp   IP сервера (имя разрешено заранее, как в update-vpn)
      * @param localDns   DNS текущей сети (Wi-Fi роутер или оператор) для российских доменов, может быть null
@@ -61,6 +86,16 @@ public final class XrayConfig {
     public static String build(ProxyLink link, String serverIp, String localDns, Collection<String> exceptions,
                                BmstuRoute bmstu, List<String> directDomains, List<String> tunnelDomains)
             throws JSONException {
+        return build(link, serverIp, localDns, exceptions, bmstu, directDomains, tunnelDomains,
+                new ArrayList<>());
+    }
+
+    /**
+     * @param extra дополнительные туннели (работают только вместе с основным VPN; без него не добавляются)
+     */
+    public static String build(ProxyLink link, String serverIp, String localDns, Collection<String> exceptions,
+                               BmstuRoute bmstu, List<String> directDomains, List<String> tunnelDomains,
+                               List<TunnelRoute> extra) throws JSONException {
         // link == null — режим «только МГТУ»: основного сервера нет, bmstu.ru идёт в туннель университета,
         // всё остальное (и DNS) — напрямую
         boolean corpOnly = link == null;
@@ -80,7 +115,9 @@ public final class XrayConfig {
         root.put("inbounds", new JSONArray().put(tunInbound()));
         JSONArray outbounds = new JSONArray();
         // Первый outbound — маршрут по умолчанию: proxy (как final: proxy), без основного VPN — direct
-        if (!corpOnly) outbounds.put(proxyOutbound(link, serverIp));
+        if (!corpOnly) outbounds.put(proxyOutbound(link, serverIp, "proxy"));
+        List<TunnelRoute> tunnels = corpOnly ? new ArrayList<>() : extra;
+        for (TunnelRoute t : tunnels) outbounds.put(proxyOutbound(t.link, t.serverIp, t.tag));
         outbounds.put(new JSONObject().put("tag", "direct").put("protocol", "freedom")
                         .put("streamSettings", new JSONObject()
                                 .put("sockopt", new JSONObject().put("domainStrategy", "UseIPv4"))))
@@ -90,7 +127,7 @@ public final class XrayConfig {
         if (bmstu != null) outbounds.put(bmstuOutbound(bmstu));
         root.put("outbounds", outbounds);
         root.put("routing", routing(localDns, directDomains, tunnelDomains, userDomains, userCidrs, bmstu != null,
-                corpOnly));
+                corpOnly, tunnels));
         return root.toString(2);
     }
 
@@ -109,7 +146,7 @@ public final class XrayConfig {
     public static String buildPing(ProxyLink link, String serverIp) throws JSONException {
         JSONObject root = new JSONObject();
         root.put("log", new JSONObject().put("loglevel", "none"));
-        root.put("outbounds", new JSONArray().put(proxyOutbound(link, serverIp)));
+        root.put("outbounds", new JSONArray().put(proxyOutbound(link, serverIp, "proxy")));
         return root.toString();
     }
 
@@ -175,7 +212,8 @@ public final class XrayConfig {
 
     private static JSONObject routing(String localDns, List<String> directDomains, List<String> tunnelDomains,
                                       List<String> userDomains, List<String> userCidrs,
-                                      boolean bmstu, boolean corpOnly) throws JSONException {
+                                      boolean bmstu, boolean corpOnly, List<TunnelRoute> extra)
+            throws JSONException {
         JSONArray rules = new JSONArray();
 
         // Запросы самого DNS-модуля к DNS сети идут напрямую, к 8.8.8.8 — через VPN (правило по умолчанию)
@@ -204,6 +242,23 @@ public final class XrayConfig {
 
         rules.put(rule().put("ip", toArray(RoutingRules.PRIVATE_CIDRS)).put("outboundTag", "direct"));
         rules.put(rule().put("port", RoutingRules.DIRECT_PORTS).put("outboundTag", "direct"));
+
+        // Домены и подсети дополнительных туннелей — раньше «Напрямую»: выбор пользователя для конкретного
+        // сайта важнее общих правил (так можно пустить через туннель и сайт в зоне .ru)
+        for (TunnelRoute t : extra) {
+            List<String> names = new ArrayList<>();
+            List<String> cidrs = new ArrayList<>();
+            for (String d : t.domains) (Exceptions.isCidr(d) ? cidrs : names).add(d);
+            JSONArray domains = domainList(names, null);
+            if (domains.length() > 0) {
+                // QUIC отклоняется, как и для основного сервера: браузер перейдёт на TCP
+                rules.put(rule().put("domain", domains).put("network", "udp").put("port", "443")
+                        .put("outboundTag", "block"));
+                rules.put(rule().put("domain", domains).put("outboundTag", t.tag));
+            }
+            if (!cidrs.isEmpty()) rules.put(rule().put("ip", toArray(cidrs)).put("outboundTag", t.tag));
+        }
+
         // Правило с пустым списком доменов не добавляется (все встроенные могли быть удалены)
         JSONArray tunnels = domainList(tunnelDomains, null);
         if (tunnels.length() > 0) rules.put(rule().put("domain", tunnels).put("outboundTag", "direct"));
@@ -214,6 +269,14 @@ public final class XrayConfig {
         }
         // QUIC к зарубежным ресурсам отклоняется: приложения сразу переходят на TCP
         rules.put(rule().put("network", "udp").put("port", "443").put("outboundTag", "block"));
+
+        // Приложения дополнительных туннелей: всё, что не ушло напрямую по правилам выше, идёт не на основной
+        // сервер, а в свой туннель. Приложение узнаётся по UID соединения (ProcessFinder в ядре)
+        for (TunnelRoute t : extra) {
+            if (!t.uids.isEmpty()) {
+                rules.put(rule().put("process", toArray(t.uids)).put("outboundTag", t.tag));
+            }
+        }
 
         return new JSONObject().put("domainStrategy", "AsIs").put("rules", rules);
     }
@@ -239,8 +302,8 @@ public final class XrayConfig {
     }
 
     /** VLESS-выход: то же, что update_xray в update-vpn.py. */
-    private static JSONObject proxyOutbound(ProxyLink p, String serverIp) throws JSONException {
-        if (p.isHysteria()) return hysteriaOutbound(p, serverIp);
+    private static JSONObject proxyOutbound(ProxyLink p, String serverIp, String tag) throws JSONException {
+        if (p.isHysteria()) return hysteriaOutbound(p, serverIp, tag);
         JSONObject user = new JSONObject().put("id", p.uuid)
                 .put("encryption", p.encryption.isEmpty() ? "none" : p.encryption);
         if (!p.flow.isEmpty()) user.put("flow", p.flow);
@@ -288,7 +351,7 @@ public final class XrayConfig {
         }
 
         JSONObject outbound = new JSONObject()
-                .put("tag", "proxy")
+                .put("tag", tag)
                 .put("protocol", "vless")
                 .put("settings", new JSONObject().put("vnext", new JSONArray().put(new JSONObject()
                         .put("address", serverIp)
@@ -312,7 +375,7 @@ public final class XrayConfig {
      * Hysteria2 (QUIC): тот же вид, что панель отдаёт клиентам Xray — protocol hysteria версии 2,
      * транспорт hysteria с auth, TLS с ALPN h3, обфускация salamander — маска finalmask.udp.
      */
-    private static JSONObject hysteriaOutbound(ProxyLink p, String serverIp) throws JSONException {
+    private static JSONObject hysteriaOutbound(ProxyLink p, String serverIp, String tag) throws JSONException {
         JSONObject tls = new JSONObject()
                 .put("serverName", firstNonEmpty(p.sni, p.server))
                 .put("alpn", alpnList(p.alpn.isEmpty() ? "h3" : p.alpn));
@@ -337,7 +400,7 @@ public final class XrayConfig {
         if (finalmask != null) stream.put("finalmask", finalmask);
 
         return new JSONObject()
-                .put("tag", "proxy")
+                .put("tag", tag)
                 .put("protocol", "hysteria")
                 .put("settings", new JSONObject().put("address", serverIp).put("port", p.port).put("version", 2))
                 .put("streamSettings", stream);

@@ -23,7 +23,7 @@ VLESS/Hysteria2-сервер, сайты МГТУ — через корпора�
 
 | Папка | Что внутри |
 |---|---|
-| [`android/`](android/) | Приложение для Android: Xray-core в VpnService, подписки, клиент OpenVPN МГТУ |
+| [`android/`](android/) | Приложение для Android: Xray-core в VpnService, подписки, дополнительные туннели, клиент OpenVPN МГТУ |
 | [`desktop/`](desktop/) | Приложение для Windows и Linux: то же ядро Xray и клиент МГТУ, своё окно, значок в трее |
 
 Подробности, сборка и устройство — в README каждого приложения.
