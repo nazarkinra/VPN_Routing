@@ -1,8 +1,11 @@
 package com.example.vpn_routing;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.PermissionInfo;
+import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
@@ -16,8 +19,11 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import androidx.appcompat.widget.SearchView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -28,6 +34,7 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -121,7 +128,8 @@ public class AppsActivity extends AppCompatActivity {
         adapter = new Adapter();
         list.setAdapter(adapter);
         render();
-        load();
+        if (needsMiuiAppsPermission()) appsPermission.launch(MIUI_GET_INSTALLED_APPS);
+        else load();
     }
 
     @Override
@@ -150,17 +158,53 @@ public class AppsActivity extends AppCompatActivity {
         return true;
     }
 
-    /** Список установленных приложений с доступом в интернет — в фоне: подписи читаются долго. */
+    /**
+     * MIUI / HyperOS (Xiaomi): список установленных приложений — отдельное разрешение «Доступ к списку
+     * приложений». Без него система отдаёт только часть приложений, и в списке не хватает установленных.
+     */
+    private static final String MIUI_GET_INSTALLED_APPS = "com.android.permission.GET_INSTALLED_APPS";
+
+    private final ActivityResultLauncher<String> appsPermission = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(), granted -> {
+                if (!granted) {
+                    Toast.makeText(this, "Без доступа к списку приложений система показывает не все "
+                            + "установленные приложения", Toast.LENGTH_LONG).show();
+                }
+                load();
+            });
+
+    private boolean needsMiuiAppsPermission() {
+        try {
+            PermissionInfo p = getPackageManager().getPermissionInfo(MIUI_GET_INSTALLED_APPS, 0);
+            return p != null && "com.lbe.security.miui".equals(p.packageName)
+                    && ContextCompat.checkSelfPermission(this, MIUI_GET_INSTALLED_APPS)
+                    != PackageManager.PERMISSION_GRANTED;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false; // не Xiaomi: список доступен по QUERY_ALL_PACKAGES
+        }
+    }
+
+    /**
+     * Список установленных приложений — в фоне: подписи читаются долго. Показываются все приложения со
+     * значком в меню (даже без разрешения INTERNET: например, Gemini ходит в сеть через приложение Google),
+     * а без значка — только с доступом в интернет.
+     */
     private void load() {
         io.execute(() -> {
             PackageManager pm = getPackageManager();
+            Set<String> launchable = new HashSet<>();
+            Intent launcherIntent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            for (ResolveInfo ri : pm.queryIntentActivities(launcherIntent, 0)) {
+                launchable.add(ri.activityInfo.packageName);
+            }
             List<App> result = new ArrayList<>();
             for (ApplicationInfo info : pm.getInstalledApplications(0)) {
                 if (info.packageName.equals(getPackageName())) continue;
-                if (pm.checkPermission(Manifest.permission.INTERNET, info.packageName)
+                boolean launcher = launchable.contains(info.packageName)
+                        || pm.getLaunchIntentForPackage(info.packageName) != null;
+                if (!launcher && pm.checkPermission(Manifest.permission.INTERNET, info.packageName)
                         != PackageManager.PERMISSION_GRANTED) continue;
                 boolean system = (info.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-                boolean launcher = pm.getLaunchIntentForPackage(info.packageName) != null;
                 result.add(new App(info.packageName, String.valueOf(pm.getApplicationLabel(info)), system && !launcher));
             }
             Collator collator = Collator.getInstance(new Locale("ru"));

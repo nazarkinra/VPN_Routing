@@ -90,6 +90,10 @@ public class RoutingVpnService extends VpnService {
     private static volatile boolean corpOn;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    /** Служба уничтожена (onDestroy): оставшиеся задачи только освобождают её ресурсы. */
+    private volatile boolean destroyed;
+    /** Последняя команда службе (onStartCommand, главный поток): остановка не отменяет более новую. */
+    private volatile int lastStartId;
     private ParcelFileDescriptor tun;
     private CoreController core;
     private Settings settings;
@@ -107,9 +111,14 @@ public class RoutingVpnService extends VpnService {
 
     // ---------- Состояние для интерфейса ----------
 
-    /** Состояние основного VPN. */
+    /**
+     * Состояние основного VPN. Службы нет — значит, ничего не включено, что бы ни осталось в state
+     * (иначе кнопка «отключала» бы несуществующую службу и VPN не включался до перезапуска приложения).
+     */
     public static State getState() {
-        return state;
+        State s = state;
+        if (instance == null && (s == State.CONNECTED || s == State.CONNECTING)) return State.STOPPED;
+        return s;
     }
 
     public static String getMessage() {
@@ -118,12 +127,13 @@ public class RoutingVpnService extends VpnService {
 
     /** Основной VPN подключён или подключается. */
     public static boolean isMainActive() {
-        return state == State.CONNECTED || state == State.CONNECTING;
+        State s = getState();
+        return s == State.CONNECTED || s == State.CONNECTING;
     }
 
     /** VPN МГТУ включён (туннель подключён, подключается или ждёт повтора). */
     public static boolean isCorpOn() {
-        return corpOn;
+        return corpOn && instance != null;
     }
 
     public static void addListener(Listener l) {
@@ -149,6 +159,8 @@ public class RoutingVpnService extends VpnService {
     private static volatile long lastDelay;
 
     private void setState(State newState, String newMessage) {
+        // Задача уже уничтоженной службы не должна менять общее состояние (его может вести новая служба)
+        if (destroyed) return;
         if (newState == State.CONNECTED && state != State.CONNECTED) connectedSince = System.currentTimeMillis();
         if (newState == State.STOPPED || newState == State.ERROR) {
             connectedSince = 0;
@@ -229,20 +241,21 @@ public class RoutingVpnService extends VpnService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
+        lastStartId = startId;
 
         if (ACTION_STOP.equals(action)) {
-            worker.execute(() -> stopEverything(true));
+            run(() -> stopEverything(true));
             return START_NOT_STICKY;
         }
         if (ACTION_STOP_MAIN.equals(action)) {
-            worker.execute(() -> {
+            run(() -> {
                 mainOn = false;
                 apply();
             });
             return START_STICKY;
         }
         if (ACTION_STOP_CORP.equals(action)) {
-            worker.execute(() -> {
+            run(() -> {
                 settings.setBmstuEnabled(false);
                 apply();
             });
@@ -253,12 +266,12 @@ public class RoutingVpnService extends VpnService {
             // null — перезапуск системой: включить части, как были. SERVICE_INTERFACE — «Постоянная VPN»
             // (always-on): основной VPN и МГТУ, если он был включён
             boolean main = action != null || settings.wasMainOn();
-            worker.execute(() -> {
+            run(() -> {
                 mainOn = main;
                 apply();
             });
         } else if (ACTION_START_CORP.equals(action)) {
-            worker.execute(() -> {
+            run(() -> {
                 // Всё было выключено: включается только МГТУ
                 if (core == null) mainOn = false;
                 settings.setBmstuEnabled(true);
@@ -266,22 +279,22 @@ public class RoutingVpnService extends VpnService {
             });
         } else if (ACTION_APPLY_KEY.equals(action)) {
             String url = intent.getStringExtra(EXTRA_URL);
-            worker.execute(() -> applyKeyInternal(url));
+            run(() -> applyKeyInternal(url));
         } else if (ACTION_RELOAD.equals(action)) {
-            worker.execute(() -> {
+            run(() -> {
                 if (core != null) restartCore("Правила обновлены");
             });
         } else if (ACTION_RELOAD_APPS.equals(action)) {
-            worker.execute(this::reloadApps);
+            run(this::reloadApps);
         } else if (ACTION_BMSTU_SYNC.equals(action)) {
-            worker.execute(() -> {
+            run(() -> {
                 if (core != null && settings.isBmstuEnabled()) bmstu.restart();
             });
         } else if (ACTION_BMSTU_OVPN.equals(action)) {
             String text = intent.getStringExtra(EXTRA_OVPN);
             if (text != null) bmstu.applyOvpn(text);
         } else {
-            worker.execute(() -> {
+            run(() -> {
                 // Всё было выключено: включается только основной (флаг МГТУ мог остаться от прошлого раза)
                 if (core == null) settings.setBmstuEnabled(false);
                 mainOn = true;
@@ -291,20 +304,59 @@ public class RoutingVpnService extends VpnService {
         return START_STICKY;
     }
 
+    /**
+     * Задача в фоновом потоке службы. Неожиданная ошибка не должна оставить VPN в «Подключение…»
+     * навсегда, а задача после onDestroy (сеть сменилась в момент остановки) — уронить приложение.
+     */
+    private void run(Runnable task) {
+        try {
+            worker.execute(() -> {
+                try {
+                    task.run();
+                } catch (Throwable t) {
+                    Log.e(TAG, "task failed", t);
+                    try {
+                        fail(new Exception(t), errorText(t));
+                    } catch (Throwable t2) {
+                        Log.e(TAG, "fail() failed", t2);
+                    }
+                }
+                // Ничего не включено (например, «Обновить правила» сразу после отключения) — служба не нужна
+                if (!destroyed && core == null && !mainOn && !settings.isBmstuEnabled()) postStop();
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            Log.w(TAG, "service destroyed, task dropped");
+        }
+    }
+
     @Override
     public void onRevoke() {
         // Пользователь включил другой VPN или отозвал разрешение
-        worker.execute(() -> stopEverything(true));
+        run(() -> stopEverything(true));
     }
 
     @Override
     public void onDestroy() {
-        worker.execute(() -> stopEverything(false));
+        destroyed = true;
+        run(() -> stopEverything(false));
         worker.shutdown();
         bmstu.shutdown();
         if (instance == this) {
             instance = null;
             bmstuvpn.Bmstuvpn.setProtector(null);
+            // Сбросить состояние сразу, не дожидаясь фонового потока (он может быть занят): службы больше нет
+            mainOn = false;
+            corpOn = false;
+            if (state == State.CONNECTED || state == State.CONNECTING) {
+                state = State.STOPPED;
+                message = "Отключено";
+                connectedSince = 0;
+                lastDelay = 0;
+            }
+            VpnTileService.refresh(this);
+            mainHandler.post(() -> {
+                for (Listener l : listeners) l.onStateChanged(getState(), message);
+            });
         }
         super.onDestroy();
     }
@@ -316,6 +368,9 @@ public class RoutingVpnService extends VpnService {
      * конфиг Xray пересобирается (выход на сервер — если включён основной, bmstu.ru — если МГТУ).
      */
     private void apply() {
+        // Команда пришла, а служба тем временем остановлена: туннель уничтоженной службы не поднимать
+        // (следующее нажатие запустит новую службу)
+        if (destroyed) return;
         boolean corp = settings.isBmstuEnabled();
         settings.setMainOn(mainOn);
         if (!mainOn && !corp) {
@@ -572,11 +627,14 @@ public class RoutingVpnService extends VpnService {
      * службы системой: флаги остаются, чтобы при перезапуске включить части, как были).
      */
     private void stopEverything(boolean resetFlags) {
-        mainOn = false;
-        corpOn = false;
-        if (resetFlags) {
-            settings.setMainOn(false);
-            settings.setBmstuEnabled(false);
+        // Общие флаги трогает только живая служба: после onDestroy их могла уже выставить новая
+        if (!destroyed) {
+            mainOn = false;
+            corpOn = false;
+            if (resetFlags) {
+                settings.setMainOn(false);
+                settings.setBmstuEnabled(false);
+            }
         }
         appliedLink = null;
         bmstu.stopAll();
@@ -589,11 +647,23 @@ public class RoutingVpnService extends VpnService {
             tun = null;
         }
         unwatchNetwork();
+        if (destroyed) return;
         if (state != State.ERROR) setState(State.STOPPED, "Отключено");
         else notifyListeners(true);
+        postStop();
+    }
+
+    /**
+     * Остановить службу, только если после этого не пришла новая команда («Отключить» и сразу «Подключить»):
+     * иначе stopSelf() уничтожил бы службу вместе с новым подключением. Если новая команда ничего не
+     * включила, после неё run() вызовет postStop() снова.
+     */
+    private void postStop() {
+        int stopId = lastStartId;
         mainHandler.post(() -> {
+            if (destroyed || stopId != lastStartId) return;
             stopForeground(true);
-            stopSelf();
+            stopSelf(stopId);
         });
     }
 
@@ -689,7 +759,7 @@ public class RoutingVpnService extends VpnService {
         lastNetwork = network;
         boolean networkChanged = previous != null && !previous.equals(network);
         // Сменилась сеть (дом -> мобильная): российские домены должны резолвиться через DNS новой сети
-        worker.execute(() -> {
+        run(() -> {
             if (core != null && !equalsNullable(dns, appliedDns)) {
                 Log.i(TAG, "network DNS changed: " + appliedDns + " -> " + dns);
                 restartCore("Подключено (сменилась сеть)");

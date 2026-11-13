@@ -1,23 +1,23 @@
 {
-  "versionCode": 8,
-  "versionName": "1.7",
-  "notes": "Маршрутизация по приложениям (как в Happ): вкладка «Напрямую» → «Приложения». Режимы: все программы по правилам VPN, только выбранные по правилам (остальные напрямую) или все, кроме выбранных (выбранные напрямую). Программы выбираются из запущенных или по имени файла",
+  "versionCode": 9,
+  "versionName": "1.8",
+  "notes": "Исправления: установка и обновление поверх установленной версии (ошибка «служба: The parameter is incorrect»); окно правильно перекрашивается при смене светлой и тёмной темы",
   "date": "2026-11-13",
   "files": {
     "linux-amd64": {
       "file": "VPN_routing-linux-amd64.tar.gz",
-      "size": 23371180,
-      "sha256": "534b77ebd442d9100bb36f100ea30621551dd4d9c96c7fa161fff0989a7839fb"
+      "size": 23370151,
+      "sha256": "c46e16456bc3f3835e0b347bc608db130b457831a5c0fbbf512da553f2380b3c"
     },
     "windows-amd64": {
       "file": "VPN_routing-windows.zip",
-      "size": 48256584,
-      "sha256": "1f6f83bb17bcb5898002cf56b16003a497ee8db21e9b6e1dd0eb1355d8d34dd5"
+      "size": 48235706,
+      "sha256": "c56730eba09d08b053b083c26a81fe672eb82e6b83a271566f1c04d88facbb03"
     },
     "windows-setup": {
       "file": "VPN_routing-setup.exe",
-      "size": 49072640,
-      "sha256": "01f84d4921eb3d300ea4edf8ab4aa0f5bdde0ad5a2d40efa93646d3a43f95c8b"
+      "size": 49074176,
+      "sha256": "3a32a276deeeaa6d61f62090b312e9d874d0d1f1586f75de3b9b9e5e7caaa652"
     }
   }
 }

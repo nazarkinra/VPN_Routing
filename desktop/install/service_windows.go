@@ -96,6 +96,9 @@ func InstallService(exe string) error {
 	}
 	defer m.Disconnect()
 	cfg := mgr.Config{
+		// Тип обязателен: CreateService подставляет его сам, а UpdateConfig передаёт как есть, и 0 при
+		// установке поверх существующей службы — ERROR_INVALID_PARAMETER («The parameter is incorrect», issue #2)
+		ServiceType:  windows.SERVICE_WIN32_OWN_PROCESS,
 		DisplayName:  AppName,
 		Description:  "VPN со сплит-маршрутизацией (Xray) и VPN МГТУ. Окно — «VPN routing» в меню «Пуск».",
 		StartType:    mgr.StartAutomatic,

@@ -55,6 +55,8 @@ type UI struct {
 	o   Options
 	app fyne.App
 	win fyne.Window
+	// variant — тема (светлая/тёмная), в цветах которой построено окно
+	variant fyne.ThemeVariant
 
 	st      *api.State
 	stMu    sync.Mutex
@@ -88,6 +90,19 @@ func New(o Options) *UI {
 	u.win.SetIcon(appIcon)
 	u.win.Resize(fyne.NewSize(900, 680))
 	u.build()
+	// Карточки, заголовки и кнопка подключения красятся цветами темы при создании. Тема системы может
+	// смениться и после запуска (на Linux её сообщает портал уже после старта, плюс ночной режим по
+	// расписанию) — тогда окно пересобирается, иначе тёмные карточки остаются на светлом фоне.
+	u.variant = a.Settings().ThemeVariant()
+	a.Settings().AddListener(func(s fyne.Settings) {
+		v := s.ThemeVariant()
+		fyne.Do(func() {
+			if v != u.variant {
+				u.variant = v
+				u.rebuild()
+			}
+		})
+	})
 	if o.Tray {
 		u.setupTray()
 		u.win.SetCloseIntercept(func() { u.win.Hide() })
@@ -139,6 +154,15 @@ func (u *UI) build() {
 	u.toast.Hide()
 	u.banner = container.NewVBox()
 	u.win.SetContent(container.NewBorder(u.banner, container.NewPadded(u.toast), nil, nil, u.tabs))
+}
+
+// rebuild — пересоздать содержимое окна в цветах текущей темы, оставив открытой ту же вкладку.
+func (u *UI) rebuild() {
+	sel := u.tabs.SelectedIndex()
+	u.offline = false // плашка «служба не запущена» появится снова при следующем опросе
+	u.build()
+	u.tabs.SelectIndex(sel)
+	u.render(true)
 }
 
 // ---------- Состояние ----------
