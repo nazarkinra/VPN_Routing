@@ -69,6 +69,9 @@ type VPN struct {
 	watching     chan struct{}
 	lastUplink   *netenv.Uplink
 
+	// tunnels — состояние дополнительных туннелей в работающем ядре
+	tunnels tunnelStates
+
 	// Для диагностики «сервер не отвечает»: сервер, его IP и чем IP получен
 	diagMu     sync.Mutex
 	diagLink   *core.ProxyLink
@@ -451,9 +454,17 @@ func (v *VPN) startCore(url string) error {
 		}
 		route = &core.BmstuRoute{Port: p.Port(), User: p.User(), Password: p.Password()}
 	}
+	// Дополнительные туннели — только вместе с основным VPN
+	var tunnels []core.TunnelRoute
+	if link != nil {
+		tunnels = v.resolveTunnels()
+	} else {
+		v.clearTunnelStatus()
+	}
 	config, err := core.BuildConfig(link, serverIP, up.DNS, v.store.Exceptions(), v.store.Builtins(), route,
-		v.store.AppRules(), v.tunOptions())
+		v.store.AppRules(), tunnels, v.tunOptions())
 	if err != nil {
+		v.clearTunnelStatus()
 		return err
 	}
 	v.stopCore()
@@ -471,7 +482,8 @@ func (v *VPN) startCore(url string) error {
 	v.diagLink, v.diagIP, v.diagMethod = link, serverIP, method
 	v.diagMu.Unlock()
 	if link != nil {
-		logf("Xray started: %s via %s, uplink %s, local DNS %q", link.Describe(), serverIP, up.Name, up.DNS)
+		logf("Xray started: %s via %s, tunnels %d, uplink %s, local DNS %q", link.Describe(), serverIP, len(tunnels),
+			up.Name, up.DNS)
 	} else {
 		logf("Xray started: only BMSTU VPN, uplink %s, local DNS %q", up.Name, up.DNS)
 	}
@@ -501,6 +513,7 @@ func (v *VPN) stopEverything(resetFlags bool) {
 	}
 	v.bmstu.StopAll()
 	v.stopCore()
+	v.clearTunnelStatus()
 	v.unwatchNetwork()
 	v.diagMu.Lock()
 	v.diagLink = nil

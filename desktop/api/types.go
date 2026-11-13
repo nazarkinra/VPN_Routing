@@ -67,6 +67,25 @@ type Bmstu struct {
 	FileInfo       string          `json:"fileInfo"`
 }
 
+// TunnelView — дополнительный туннель для окна.
+type TunnelView struct {
+	ID string `json:"id"`
+	// Number — номер туннеля (1 — основной VPN, дополнительные с 2).
+	Number  int      `json:"number"`
+	Name    string   `json:"name"`
+	Enabled bool     `json:"enabled"`
+	Apps    []string `json:"apps"`
+	Domains []string `json:"domains"`
+	// ServerID — id выбранного сервера в списке ("" — не выбран или его больше нет в списке).
+	ServerID       string `json:"serverId"`
+	HasServer      bool   `json:"hasServer"`
+	ServerTitle    string `json:"serverTitle"`
+	ServerSubtitle string `json:"serverSubtitle"`
+	// Running — туннель запущен в ядре; Status — его состояние.
+	Running bool             `json:"running"`
+	Status  app.TunnelStatus `json:"status"`
+}
+
 type Autostart struct {
 	Supported bool `json:"supported"`
 	Enabled   bool `json:"enabled"`
@@ -82,7 +101,9 @@ type State struct {
 	Bmstu    Bmstu       `json:"bmstu"`
 	Direct   Direct      `json:"direct"`
 	// Apps — маршрутизация по приложениям.
-	Apps       app.Apps         `json:"apps"`
+	Apps app.Apps `json:"apps"`
+	// Tunnels — дополнительные туннели.
+	Tunnels    []TunnelView     `json:"tunnels"`
 	Prefs      app.Prefs        `json:"prefs"`
 	Autostart  Autostart        `json:"autostart"`
 	Update     app.UpdateStatus `json:"update"`
@@ -92,6 +113,7 @@ type State struct {
 // Result — ответ команды: сообщение для пользователя и данные (поля зависят от команды).
 type Result struct {
 	OK      bool     `json:"ok"`
+	ID      string   `json:"id"`
 	Message string   `json:"message"`
 	Error   string   `json:"error"`
 	URL     string   `json:"url"`

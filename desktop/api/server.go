@@ -115,6 +115,13 @@ func (s *Server) routes() http.Handler {
 	api("/api/apps/processes", func(_ *http.Request) (any, error) {
 		return map[string]any{"processes": app.Processes()}, nil
 	})
+	// Дополнительные туннели
+	api("/api/tunnels/add", s.post(s.tunnelAdd))
+	api("/api/tunnels/set", s.post(s.tunnelSet))
+	api("/api/tunnels/remove", s.post(s.tunnelRemove))
+	api("/api/tunnels/apps", s.post(s.tunnelApps))
+	api("/api/tunnels/domain/add", s.post(s.tunnelDomainAdd))
+	api("/api/tunnels/domain/remove", s.post(s.tunnelDomainRemove))
 	api("/api/update/check", s.post(s.checkUpdate))
 	api("/api/update/skip", s.post(s.skipUpdate))
 	api("/api/update/install", s.post(s.installUpdate))
@@ -221,6 +228,7 @@ func (s *Server) state(_ *http.Request) (any, error) {
 		Bmstu:      s.bmstuView(),
 		Direct:     s.directView(),
 		Apps:       s.Store.Apps(),
+		Tunnels:    s.tunnelsView(),
 		Prefs:      s.Store.Prefs(),
 		Autostart:  s.autostart(false),
 		Update:     s.Updater.Status(),

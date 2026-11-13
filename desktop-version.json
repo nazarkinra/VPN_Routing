@@ -1,23 +1,23 @@
 {
-  "versionCode": 9,
-  "versionName": "1.8",
-  "notes": "Исправления: установка и обновление поверх установленной версии (ошибка «служба: The parameter is incorrect»); окно правильно перекрашивается при смене светлой и тёмной темы",
+  "versionCode": 10,
+  "versionName": "2.1",
+  "notes": "Дополнительные туннели: новая вкладка «Туннели». К основному VPN можно добавить сколько угодно туннелей через другие серверы — каждый со своими программами и доменами, всё работает одновременно",
   "date": "2026-11-13",
   "files": {
     "linux-amd64": {
       "file": "VPN_routing-linux-amd64.tar.gz",
-      "size": 23370151,
-      "sha256": "c46e16456bc3f3835e0b347bc608db130b457831a5c0fbbf512da553f2380b3c"
+      "size": 23469821,
+      "sha256": "e999a9964c37c85bcfd8d546e834edc3fbf867892e8dc7833d0d120b893269be"
     },
     "windows-amd64": {
       "file": "VPN_routing-windows.zip",
-      "size": 48235706,
-      "sha256": "c56730eba09d08b053b083c26a81fe672eb82e6b83a271566f1c04d88facbb03"
+      "size": 48318091,
+      "sha256": "e10f6f4ffad5802708c97119e755ead39ca5396f8aab922cadaa9f7014818bdb"
     },
     "windows-setup": {
       "file": "VPN_routing-setup.exe",
-      "size": 49074176,
-      "sha256": "3a32a276deeeaa6d61f62090b312e9d874d0d1f1586f75de3b9b9e5e7caaa652"
+      "size": 49142784,
+      "sha256": "a80d625ed5c5b720166a65f3a8b01130b993c44f8d7065b134a582677e425c4b"
     }
   }
 }

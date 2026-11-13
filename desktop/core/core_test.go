@@ -32,7 +32,7 @@ func mustLink(t *testing.T, url string) *ProxyLink {
 func buildMap(t *testing.T, url string, bmstu *BmstuRoute) map[string]any {
 	t.Helper()
 	s, err := BuildConfig(mustLink(t, url), "93.184.216.34", "192.168.0.1",
-		[]string{"bmstu.example", "195.19.0.0/16"}, AllBuiltins(), bmstu, AppRules{}, testTun)
+		[]string{"bmstu.example", "195.19.0.0/16"}, AllBuiltins(), bmstu, AppRules{}, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestBuiltinCoverage(t *testing.T) {
 
 func TestXrayConfigHasNoDuplicateDomains(t *testing.T) {
 	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "",
-		[]string{"ya.ru", "example.com", "sub.example.com"}, AllBuiltins(), nil, AppRules{}, testTun)
+		[]string{"ya.ru", "example.com", "sub.example.com"}, AllBuiltins(), nil, AppRules{}, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestHysteriaRejectsPortHopping(t *testing.T) {
 func TestHysteriaOutbound(t *testing.T) {
 	l := mustLink(t, "hysteria2://AUTH@cdn.example.com:443/?sni=cdn.example.com&obfs=salamander"+
 		"&obfs-password=pw&pinSHA256=abcd&fm=%7B%22quicParams%22%3A%7B%22keepAlivePeriod%22%3A10%7D%7D#G")
-	s, err := BuildConfig(l, "93.184.216.34", "", nil, AllBuiltins(), nil, AppRules{}, testTun)
+	s, err := BuildConfig(l, "93.184.216.34", "", nil, AllBuiltins(), nil, AppRules{}, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestWithoutRemovesDisabledBuiltins(t *testing.T) {
 
 func TestConfigWithoutDisabledZone(t *testing.T) {
 	b := Builtins{Direct: Without(DirectDomains, []string{"ru"}), Tunnel: DirectTunnelDomains}
-	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "", nil, b, nil, AppRules{}, testTun)
+	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "", nil, b, nil, AppRules{}, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func TestConfigWithoutDisabledZone(t *testing.T) {
 
 func TestConfigWithAllBuiltinsRemoved(t *testing.T) {
 	s, err := BuildConfig(mustLink(t, "vless://id@a.example.com:443?security=tls&type=ws#A"), "1.2.3.4", "", nil,
-		Builtins{}, nil, AppRules{}, testTun)
+		Builtins{}, nil, AppRules{}, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ const corpKey = "vless://11111111-2222-3333-4444-555555555555@srv.example.com:44
 
 func corpConfig(t *testing.T, localDNS string, bmstu *BmstuRoute) (string, map[string]any) {
 	t.Helper()
-	s, err := BuildConfig(mustLink(t, corpKey), "203.0.113.10", localDNS, nil, AllBuiltins(), bmstu, AppRules{}, testTun)
+	s, err := BuildConfig(mustLink(t, corpKey), "203.0.113.10", localDNS, nil, AllBuiltins(), bmstu, AppRules{}, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestDumpHidesSecrets(t *testing.T) {
 func appsConfig(t *testing.T, link *ProxyLink, apps AppRules) []map[string]any {
 	t.Helper()
 	s, err := BuildConfig(link, "203.0.113.10", "195.19.33.202", nil, AllBuiltins(),
-		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, apps, testTun)
+		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, apps, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +619,7 @@ func TestAppsInclude(t *testing.T) {
 // Только МГТУ: основного сервера нет, bmstu.ru — в туннель, остальное и DNS — напрямую.
 func TestCorpOnlyConfig(t *testing.T) {
 	s, err := BuildConfig(nil, "", "195.19.33.202", []string{"example.org"}, AllBuiltins(),
-		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, AppRules{}, testTun)
+		&BmstuRoute{Port: 1080, User: "u", Password: "p"}, AppRules{}, nil, testTun)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -112,8 +112,10 @@ type storeData struct {
 	Bmstu            bmstuData       `json:"bmstu"`
 	Prefs            Prefs           `json:"prefs"`
 	// Apps — маршрутизация по приложениям.
-	Apps    Apps   `json:"apps"`
-	UIToken string `json:"uiToken"`
+	Apps Apps `json:"apps"`
+	// Tunnels — дополнительные туннели (версия 2.1).
+	Tunnels []*Tunnel `json:"tunnels,omitempty"`
+	UIToken string    `json:"uiToken"`
 	// Обновления: время последней проверки (мс Unix) и версия, отложенная кнопкой «Позже»
 	UpdateLastCheck int64 `json:"updateLastCheck,omitempty"`
 	UpdateSkipped   int   `json:"updateSkipped,omitempty"`

@@ -1,4 +1,4 @@
-// Package gui — окно приложения (Fyne): вкладки VPN, МГТУ, Напрямую, Настройки — как в Android-версии.
+// Package gui — окно приложения (Fyne): вкладки VPN, Туннели, МГТУ, Напрямую, Настройки — как в Android-версии.
 //
 // Окно ничего не делает с сетью само: все действия — команды api (на Windows внутри этого же процесса,
 // на Linux — к службе через сокет). Состояние перечитывается раз в секунду.
@@ -64,6 +64,7 @@ type UI struct {
 
 	tabs    *container.AppTabs
 	vpn     *vpnTab
+	tunnels *tunnelsTab
 	corp    *corpTab
 	direct  *directTab
 	setTab  *settingsTab
@@ -79,6 +80,15 @@ type UI struct {
 }
 
 var appIcon = fyne.NewStaticResource("vpnrouting.png", assets.IconPNG)
+
+// Номера вкладок окна (порядок в build).
+const (
+	tabVPN = iota
+	tabTunnels
+	tabCorp
+	tabDirect
+	tabSettings
+)
 
 // New создаёт окно (до Run). Show можно вызывать из любого потока.
 func New(o Options) *UI {
@@ -133,18 +143,20 @@ func (u *UI) Quit() { fyne.Do(u.app.Quit) }
 
 func (u *UI) build() {
 	u.vpn = newVPNTab(u)
+	u.tunnels = newTunnelsTab(u)
 	u.corp = newCorpTab(u)
 	u.direct = newDirectTab(u)
 	u.setTab = newSettingsTab(u)
 	u.tabs = container.NewAppTabs(
 		container.NewTabItemWithIcon("VPN", icon("vpn"), u.vpn.root),
+		container.NewTabItemWithIcon("Туннели", icon("tunnel"), u.tunnels.root),
 		container.NewTabItemWithIcon("МГТУ", icon("school"), u.corp.root),
 		container.NewTabItemWithIcon("Напрямую", icon("split"), u.direct.root),
 		container.NewTabItemWithIcon("Настройки", theme.SettingsIcon(), u.setTab.root),
 	)
 	u.tabs.SetTabLocation(container.TabLocationLeading)
 	u.tabs.OnSelected = func(*container.TabItem) { u.render(true) }
-	// VPNROUTING_UI_TAB=0…3 — открыть сразу нужную вкладку (для проверки внешнего вида)
+	// VPNROUTING_UI_TAB=0…4 — открыть сразу нужную вкладку (для проверки внешнего вида)
 	if i, err := strconv.Atoi(os.Getenv("VPNROUTING_UI_TAB")); err == nil && i >= 0 && i < len(u.tabs.Items) {
 		u.tabs.SelectIndex(i)
 	}
@@ -221,13 +233,15 @@ func (u *UI) render(force bool) {
 		return
 	}
 	switch u.tabs.SelectedIndex() {
-	case 0:
+	case tabVPN:
 		u.vpn.update(st, force)
-	case 1:
+	case tabTunnels:
+		u.tunnels.update(st, force)
+	case tabCorp:
 		u.corp.update(st, force)
-	case 2:
+	case tabDirect:
 		u.direct.update(st, force)
-	case 3:
+	case tabSettings:
 		u.setTab.update(st, force)
 	}
 	u.updateTray(st)
@@ -355,7 +369,7 @@ func (u *UI) maybeOfferUpdate(st *api.State) {
 }
 
 func (u *UI) installUpdate() {
-	u.act("/api/update/install", nil, "Загрузка обновления…", func(*api.Result) { u.tabs.SelectIndex(3) })
+	u.act("/api/update/install", nil, "Загрузка обновления…", func(*api.Result) { u.tabs.SelectIndex(tabSettings) })
 }
 
 // ---------- Трей (Windows; Linux — StatusNotifierItem, в GNOME через расширение AppIndicator) ----------

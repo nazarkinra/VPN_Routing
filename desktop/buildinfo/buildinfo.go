@@ -3,6 +3,6 @@ package buildinfo
 
 const (
 	// VersionCode растёт с каждым выпуском; по нему решается, новее ли опубликованная версия.
-	VersionCode = 9
-	VersionName = "1.8"
+	VersionCode = 10
+	VersionName = "2.1"
 )

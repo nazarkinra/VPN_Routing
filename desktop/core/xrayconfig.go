@@ -49,6 +49,19 @@ type AppRules struct {
 	Names []string
 }
 
+// TunnelRoute — дополнительный туннель (как в Android 2.1): свой сервер, параллельный основному. В него
+// идут программы (по имени процесса) и домены или подсети. Работает только вместе с основным VPN.
+type TunnelRoute struct {
+	// Tag — тег выхода в конфиге: tunnel-1, tunnel-2, …
+	Tag      string
+	Link     *ProxyLink
+	ServerIP string
+	// Processes — имена программ (telegram.exe, firefox), которые целиком идут через туннель.
+	Processes []string
+	// Domains — домены (с поддоменами) и IP-подсети туннеля.
+	Domains []string
+}
+
 // BmstuRoute — локальный SOCKS-прокси туннеля МГТУ.
 type BmstuRoute struct {
 	Port     int
@@ -85,11 +98,16 @@ type arr = []any
 //	bmstu      — прокси туннеля МГТУ или nil, если VPN МГТУ выключен
 //
 //	apps       — маршрутизация по приложениям (какие программы идут по правилам, а какие напрямую)
+//	tunnels    — дополнительные туннели (без основного VPN не добавляются)
 //
 // link == nil — режим «только МГТУ»: основного сервера нет, bmstu.ru идёт в туннель университета,
 // всё остальное (и DNS) — напрямую.
-func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string, builtins Builtins, bmstu *BmstuRoute, apps AppRules, tun TunOptions) (string, error) {
+func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string, builtins Builtins, bmstu *BmstuRoute, apps AppRules, tunnels []TunnelRoute, tun TunOptions) (string, error) {
 	corpOnly := link == nil
+	if corpOnly {
+		tunnels = nil
+	}
+	apps = withTunnelApps(apps, tunnels)
 	var userDomains, userCIDRs []string
 	for _, item := range exceptions {
 		if IsCIDR(item) {
@@ -110,11 +128,18 @@ func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string
 	// Первый outbound — маршрут по умолчанию: proxy (как final: proxy), без основного VPN — direct
 	var outbounds arr
 	if !corpOnly {
-		proxy, err := proxyOutbound(link, serverIP)
+		proxy, err := proxyOutbound(link, serverIP, "proxy")
 		if err != nil {
 			return "", err
 		}
 		outbounds = append(outbounds, proxy)
+	}
+	for _, t := range tunnels {
+		out, err := proxyOutbound(t.Link, t.ServerIP, t.Tag)
+		if err != nil {
+			return "", err
+		}
+		outbounds = append(outbounds, out)
 	}
 	outbounds = append(outbounds,
 		obj{"tag": "direct", "protocol": "freedom",
@@ -135,7 +160,7 @@ func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string
 		"dns":       dns,
 		"inbounds":  arr{tunInbound(tun)},
 		"outbounds": outbounds,
-		"routing":   routing(localDNS, builtins, userDomains, userCIDRs, bmstu != nil, corpOnly, apps),
+		"routing":   routing(localDNS, builtins, userDomains, userCIDRs, bmstu != nil, corpOnly, apps, tunnels),
 	}
 	b, err := json.MarshalIndent(root, "", "  ")
 	return string(b), err
@@ -143,7 +168,7 @@ func BuildConfig(link *ProxyLink, serverIP, localDNS string, exceptions []string
 
 // BuildPingConfig — конфиг для замера задержки сервера: только выход на сервер, без TUN и правил.
 func BuildPingConfig(link *ProxyLink, serverIP string) (string, error) {
-	proxy, err := proxyOutbound(link, serverIP)
+	proxy, err := proxyOutbound(link, serverIP, "proxy")
 	if err != nil {
 		return "", err
 	}
@@ -261,7 +286,7 @@ func toArr(items []string) arr {
 	return a
 }
 
-func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string, bmstu, corpOnly bool, apps AppRules) obj {
+func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string, bmstu, corpOnly bool, apps AppRules, tunnels []TunnelRoute) obj {
 	var rules arr
 	// Запросы DNS-модуля к DNS сети идут напрямую, к 8.8.8.8 — через VPN (правило по умолчанию)
 	// (у запасных серверов «+local»: они и так идут мимо правил)
@@ -285,6 +310,26 @@ func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string
 		// QUIC к сайтам МГТУ отклоняется: прокси туннеля только TCP, браузер перейдёт на TCP
 		policy = append(policy, rule("domain", arr{"domain:" + BmstuDomain}, "network", "udp", "port", "443", "outboundTag", "block"))
 	}
+	// Домены и подсети дополнительных туннелей — раньше «Напрямую»: выбор пользователя для конкретного
+	// сайта важнее общих правил (так можно пустить через туннель и сайт в зоне .ru)
+	for _, t := range tunnels {
+		var names, cidrs []string
+		for _, d := range t.Domains {
+			if IsCIDR(d) {
+				cidrs = append(cidrs, d)
+			} else {
+				names = append(names, d)
+			}
+		}
+		if domains := domainList(names, nil); len(domains) > 0 {
+			// QUIC отклоняется, как и для основного сервера: браузер перейдёт на TCP
+			policy = append(policy, rule("domain", domains, "network", "udp", "port", "443", "outboundTag", "block"))
+			policy = append(policy, rule("domain", domains, "outboundTag", t.Tag))
+		}
+		if len(cidrs) > 0 {
+			policy = append(policy, rule("ip", toArr(cidrs), "outboundTag", t.Tag))
+		}
+	}
 	// Без основного VPN всё остальное и так идёт напрямую: остальные правила не нужны
 	if !corpOnly {
 		// Правило с пустым списком доменов не добавляется (все встроенные могли быть удалены)
@@ -301,6 +346,15 @@ func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string
 		policy = append(policy, rule("network", "udp", "port", "443", "outboundTag", "block"))
 	}
 
+	// Программы дополнительных туннелей: всё, что не ушло напрямую по правилам выше, идёт не на основной
+	// сервер, а в свой туннель (после всех правил «по нашим правилам», как в Android)
+	var tunnelApps arr
+	for _, t := range tunnels {
+		if n := processNames(t.Processes); len(n) > 0 {
+			tunnelApps = append(tunnelApps, rule("process", n, "outboundTag", t.Tag))
+		}
+	}
+
 	// Маршрутизация по приложениям (процессам)
 	names := processNames(apps.Names)
 	switch {
@@ -308,6 +362,7 @@ func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string
 		// Выбранные — целиком напрямую (и мимо туннеля МГТУ), остальные — по правилам
 		rules = append(rules, rule("process", names, "outboundTag", "direct"))
 		rules = append(rules, policy...)
+		rules = append(rules, tunnelApps...)
 	case apps.Mode == AppsInclude && len(names) > 0:
 		// По правилам — только выбранные: у каждого правила условие «процесс из списка»; выбранные, не
 		// попавшие ни под одно правило, — в маршрут по умолчанию; все остальные приложения — напрямую
@@ -315,6 +370,7 @@ func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string
 			r.(obj)["process"] = names
 			rules = append(rules, r)
 		}
+		rules = append(rules, tunnelApps...)
 		def := "direct"
 		if !corpOnly {
 			def = "proxy"
@@ -323,8 +379,53 @@ func routing(localDNS string, builtins Builtins, userDomains, userCIDRs []string
 		rules = append(rules, rule("network", "tcp,udp", "outboundTag", "direct"))
 	default:
 		rules = append(rules, policy...)
+		rules = append(rules, tunnelApps...)
 	}
 	return obj{"domainStrategy": "AsIs", "rules": rules}
+}
+
+// withTunnelApps — программы туннелей всегда идут по правилам (как на Android они всегда попадают
+// в туннель): в режиме «Только выбранные» они добавляются к выбранным, в «Кроме выбранных» не исключаются.
+func withTunnelApps(apps AppRules, tunnels []TunnelRoute) AppRules {
+	inTunnel := map[string]bool{}
+	var extra []string
+	for _, t := range tunnels {
+		for _, p := range t.Processes {
+			if k := strings.ToLower(strings.TrimSpace(p)); k != "" && !inTunnel[k] {
+				inTunnel[k] = true
+				extra = append(extra, strings.TrimSpace(p))
+			}
+		}
+	}
+	if len(extra) == 0 {
+		return apps
+	}
+	switch apps.Mode {
+	case AppsInclude:
+		if len(apps.Names) == 0 {
+			return apps // никто не выбран — по правилам и так идут все
+		}
+		names := append([]string{}, apps.Names...)
+		have := map[string]bool{}
+		for _, n := range names {
+			have[strings.ToLower(n)] = true
+		}
+		for _, p := range extra {
+			if !have[strings.ToLower(p)] {
+				names = append(names, p)
+			}
+		}
+		return AppRules{Mode: apps.Mode, Names: names}
+	case AppsExclude:
+		var names []string
+		for _, n := range apps.Names {
+			if !inTunnel[strings.ToLower(strings.TrimSpace(n))] {
+				names = append(names, n)
+			}
+		}
+		return AppRules{Mode: apps.Mode, Names: names}
+	}
+	return apps
 }
 
 // processNames — имена процессов для правила Xray. Xray сравнивает имя без «.exe» с учётом регистра,
@@ -358,9 +459,9 @@ func domainList(builtin, extra []string) arr {
 }
 
 // VLESS-выход: то же, что update_xray в update-vpn.py.
-func proxyOutbound(p *ProxyLink, serverIP string) (obj, error) {
+func proxyOutbound(p *ProxyLink, serverIP, tag string) (obj, error) {
 	if p.IsHysteria() {
-		return hysteriaOutbound(p, serverIP), nil
+		return hysteriaOutbound(p, serverIP, tag), nil
 	}
 	enc := p.Encryption
 	if enc == "" {
@@ -420,7 +521,7 @@ func proxyOutbound(p *ProxyLink, serverIP string) (obj, error) {
 	}
 
 	out := obj{
-		"tag":            "proxy",
+		"tag":            tag,
 		"protocol":       "vless",
 		"settings":       obj{"vnext": arr{obj{"address": serverIP, "port": p.Port, "users": arr{user}}}},
 		"streamSettings": stream,
@@ -433,7 +534,7 @@ func proxyOutbound(p *ProxyLink, serverIP string) (obj, error) {
 }
 
 // Hysteria2 (QUIC): protocol hysteria версии 2, TLS с ALPN h3, обфускация salamander — маска finalmask.udp.
-func hysteriaOutbound(p *ProxyLink, serverIP string) obj {
+func hysteriaOutbound(p *ProxyLink, serverIP, tag string) obj {
 	alpn := p.ALPN
 	if alpn == "" {
 		alpn = "h3"
@@ -462,7 +563,7 @@ func hysteriaOutbound(p *ProxyLink, serverIP string) obj {
 		stream["finalmask"] = fm
 	}
 	return obj{
-		"tag":            "proxy",
+		"tag":            tag,
 		"protocol":       "hysteria",
 		"settings":       obj{"address": serverIP, "port": p.Port, "version": 2},
 		"streamSettings": stream,

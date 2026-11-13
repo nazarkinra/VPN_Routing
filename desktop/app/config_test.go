@@ -27,14 +27,29 @@ func TestXrayAcceptsConfigs(t *testing.T) {
 		{Name: "VPN routing", IPv6: true, SetDNS: true, BlockDNSLeak: true},
 		{Name: "vpnrouting0", DNSToGateway: true},
 	}
+	// Второй туннель — на другом протоколе, чем основной
+	hy2, _ := core.ParseLink(links["hy2"])
+	ws, _ := core.ParseLink(links["ws"])
+	links2 := map[string]*core.ProxyLink{}
+	for name := range links {
+		links2[name] = hy2
+	}
+	links2["hy2"] = ws
 	for name, url := range links {
 		link, err := core.ParseLink(url)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		for _, tun := range tuns {
+			// С дополнительными туннелями (VLESS и Hysteria2), программами и доменами
+			tunnels := []core.TunnelRoute{
+				{Tag: "tunnel-1", Link: link, ServerIP: "5.6.7.8", Processes: []string{"Telegram.exe"},
+					Domains: []string{"youtube.com", "10.8.0.0/16"}},
+				{Tag: "tunnel-2", Link: links2[name], ServerIP: "9.9.9.9", Domains: []string{"example.net"}},
+			}
 			cfg, err := core.BuildConfig(link, "93.184.216.34", "192.168.0.1", []string{"example.org", "195.19.0.0/16"}, core.AllBuiltins(),
-				&core.BmstuRoute{Port: 41234, User: "u", Password: "p"}, core.AppRules{}, tun)
+				&core.BmstuRoute{Port: 41234, User: "u", Password: "p"}, core.AppRules{Mode: core.AppsExclude, Names: []string{"steam.exe"}},
+				tunnels, tun)
 			if err != nil {
 				t.Fatal(err)
 			}
