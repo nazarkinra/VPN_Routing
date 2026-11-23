@@ -56,6 +56,13 @@ func startBackend(dir string, flags map[string]bool) *backend {
 	b := &backend{dir: dir, store: store, quitCh: make(chan struct{})}
 	b.vpn = app.NewVPN(store, dir)
 	b.servers = app.NewServers(store)
+	b.servers.OnKeyRotated = func(url string) bool {
+		if !b.vpn.MainActive() {
+			return false
+		}
+		b.vpn.ApplyKey(url)
+		return true
+	}
 	b.updater = app.NewUpdater(store, dir)
 	// Свои исключения, уже покрытые встроенными правилами (ya.ru при .ru), убираются из списка
 	store.CompactExceptions()

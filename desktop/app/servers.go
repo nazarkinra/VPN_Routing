@@ -16,6 +16,9 @@ import (
 type Servers struct {
 	store *Store
 	sem   chan struct{}
+	// OnKeyRotated — ключ выбранного сервера сменился на сервере; true — VPN включён и переходит
+	// на новый ключ сам (backend.go), false — ключ просто запоминается
+	OnKeyRotated func(url string) bool
 
 	mu         sync.Mutex
 	pinging    map[string]bool
@@ -123,6 +126,7 @@ func (s *Servers) Refresh(id string) (int, error) {
 		return 0, err
 	}
 	n := s.store.ApplySubscription(id, r)
+	s.followKeyRotation()
 	s.store.SelectFirstIfNone()
 	return n, nil
 }
