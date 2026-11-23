@@ -48,6 +48,15 @@ type Options struct {
 	OnServiceVersion func(version string)
 	// OnState — каждый ответ службы (Linux: значок в трее при входе в систему — вместе с автозапуском).
 	OnState func(st *api.State)
+
+	// SoftGL — окно рисуется программно (Mesa llvmpipe), а не видеокартой.
+	SoftGL bool
+	// SetSoftGL — сменить отрисовку окна (Windows; nil — нельзя). restarting — окно сейчас перезапустится,
+	// иначе отрисовка сменится при следующем запуске программы.
+	SetSoftGL func(on bool) (restarting bool)
+	// OnBlank — окно показано, но в нём ничего не нарисовалось (detail — для журнала). Вызывается не из
+	// потока окна.
+	OnBlank func(detail string)
 }
 
 // UI — окно приложения.
@@ -77,6 +86,9 @@ type UI struct {
 	trayMenu               *fyne.Menu
 	trayState              string
 	offered                int
+
+	// visible — окно на экране (не спрятано в трей); renderChecking — идёт проверка отрисовки (render.go)
+	visible, renderChecking bool
 }
 
 var appIcon = fyne.NewStaticResource("vpnrouting.png", assets.IconPNG)
@@ -115,7 +127,10 @@ func New(o Options) *UI {
 	})
 	if o.Tray {
 		u.setupTray()
-		u.win.SetCloseIntercept(func() { u.win.Hide() })
+		u.win.SetCloseIntercept(func() {
+			u.visible = false
+			u.win.Hide()
+		})
 	}
 	return u
 }
@@ -127,6 +142,7 @@ func (u *UI) Run() {
 		u.app.Run()
 		return
 	}
+	u.checkRender()
 	u.win.ShowAndRun()
 }
 
@@ -135,7 +151,18 @@ func (u *UI) Show() {
 	fyne.Do(func() {
 		u.win.Show()
 		u.win.RequestFocus()
+		u.checkRender()
 	})
+}
+
+// setSoftGL — переключить отрисовку окна (трей, настройки).
+func (u *UI) setSoftGL(on bool) {
+	if u.o.SetSoftGL == nil {
+		return
+	}
+	if !u.o.SetSoftGL(on) {
+		u.notify("Отрисовка сменится после перезапуска программы")
+	}
 }
 
 // Quit — закрыть окно и цикл интерфейса (выход приложения).
@@ -375,10 +402,6 @@ func (u *UI) installUpdate() {
 // ---------- Трей (Windows; Linux — StatusNotifierItem, в GNOME через расширение AppIndicator) ----------
 
 func (u *UI) setupTray() {
-	desk, ok := u.app.(desktop.App)
-	if !ok {
-		return
-	}
 	u.trayStatus = fyne.NewMenuItem("Не подключено", nil)
 	u.trayStatus.Disabled = true
 	u.trayToggle = fyne.NewMenuItem("Подключить VPN", func() { u.act("/api/vpn/toggle", nil, "", nil) })
@@ -393,8 +416,21 @@ func (u *UI) setupTray() {
 		}
 	})
 	quit.IsQuit = true
-	u.trayMenu = fyne.NewMenu("VPN routing", u.trayStatus, fyne.NewMenuItemSeparator(), u.trayToggle, u.trayCorp, open,
-		fyne.NewMenuItemSeparator(), quit)
+	items := []*fyne.MenuItem{u.trayStatus, fyne.NewMenuItemSeparator(), u.trayToggle, u.trayCorp, open}
+	// Окно белое — в само окно не попасть, поэтому переключатель отрисовки есть и здесь (issue #2)
+	if u.o.SetSoftGL != nil {
+		label := "Окно белое? Программная отрисовка"
+		if u.o.SoftGL {
+			label = "Отрисовка окна видеокартой"
+		}
+		items = append(items, fyne.NewMenuItem(label, func() { u.setSoftGL(!u.o.SoftGL) }))
+	}
+	items = append(items, fyne.NewMenuItemSeparator(), quit)
+	u.trayMenu = fyne.NewMenu("VPN routing", items...)
+	desk, ok := u.app.(desktop.App)
+	if !ok {
+		return
+	}
 	desk.SetSystemTrayMenu(u.trayMenu)
 	desk.SetSystemTrayIcon(trayIcon("stopped"))
 	desk.SetSystemTrayWindow(u.win)

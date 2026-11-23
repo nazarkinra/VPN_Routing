@@ -93,7 +93,7 @@ func redirectSoftGL(dir string, args []string) bool {
 	}
 	dst := softGLCopyDir()
 	files := map[string]string{
-		exe: filepath.Join(dst, filepath.Base(exe)),
+		exe:                                      filepath.Join(dst, filepath.Base(exe)),
 		filepath.Join(src, "opengl32.dll"):       filepath.Join(dst, "opengl32.dll"),
 		filepath.Join(src, "libgallium_wgl.dll"): filepath.Join(dst, "libgallium_wgl.dll"),
 		// Переносной версии (VPN в этом же процессе) нужен и драйвер TUN
@@ -169,6 +169,67 @@ func prepareGUI(dir string) {
 		mode = "программная отрисовка (Mesa llvmpipe)"
 	}
 	log.Printf("VPN routing %s, окно; Windows %d.%d.%d; %s", version, v.MajorVersion, v.MinorVersion, v.BuildNumber, mode)
+	go func() {
+		if vendor, renderer, ver, err := glInfo(); err != nil {
+			log.Printf("OpenGL: %v", err)
+		} else {
+			log.Printf("OpenGL: %s; %s; %s", vendor, renderer, ver)
+		}
+	}()
+}
+
+// hwGLMarker — пользователь сам выбрал отрисовку видеокартой: пустое окно не переключает её на программную.
+func hwGLMarker(dir string) string { return filepath.Join(dir, "hwgl") }
+
+// softGLAvailable — рядом с программой есть Mesa (входит в установщик и zip).
+func softGLAvailable() bool {
+	_, err := os.Stat(filepath.Join(filepath.Dir(mainExe()), app.SoftGLDir, "opengl32.dll"))
+	return err == nil
+}
+
+// guiRenderOptions — переключатель отрисовки и реакция на пустое окно для gui.Options (issue #2).
+func guiRenderOptions() (bool, func(bool) bool, func(string)) {
+	if !softGLAvailable() {
+		return runningSoftGLCopy(), nil, nil
+	}
+	return runningSoftGLCopy(), setSoftGL, onBlank
+}
+
+// setSoftGL — выбор пользователя (трей, настройки): запомнить и перезапустить окно, если можно.
+func setSoftGL(on bool) bool {
+	soft, hw := softGLMarker(guiDataDir), hwGLMarker(guiDataDir)
+	if on {
+		touch(soft)
+		_ = os.Remove(hw)
+		log.Printf("программная отрисовка включена пользователем")
+	} else {
+		_ = os.Remove(soft)
+		touch(hw)
+		log.Printf("отрисовка видеокартой выбрана пользователем")
+	}
+	if glRestart == nil {
+		return false
+	}
+	go glRestart()
+	return true
+}
+
+func touch(path string) {
+	if f, err := os.Create(path); err == nil {
+		f.Close()
+	}
+}
+
+// onBlank — окно показано, но пустое (OpenGL без ошибок, а ничего не нарисовано).
+func onBlank(detail string) {
+	if runningSoftGLCopy() {
+		return // и программная отрисовка пустая — переключать некуда, в журнале уже есть подробности
+	}
+	if _, err := os.Stat(hwGLMarker(guiDataDir)); err == nil {
+		log.Printf("отрисовку видеокартой выбрал пользователь — не переключаю")
+		return
+	}
+	glOnce.Do(func() { onGLFailure(detail) })
 }
 
 // glWatch ищет в журнале Fyne ошибки OpenGL, после которых окно остаётся пустым.
@@ -187,15 +248,13 @@ func onGLFailure(detail string) {
 	mesa := filepath.Join(filepath.Dir(mainExe()), app.SoftGLDir, "opengl32.dll")
 	if _, err := os.Stat(mesa); err == nil && !runningSoftGLCopy() {
 		// Запомнить: следующие запуски сразу с программной отрисовкой
-		if f, err := os.Create(softGLMarker(guiDataDir)); err == nil {
-			f.Close()
-		}
+		touch(softGLMarker(guiDataDir))
 		log.Printf("включена программная отрисовка")
 		if glRestart != nil {
 			glRestart()
 			return
 		}
-		showError("Видеодрайвер не дал окну OpenGL 2.1, поэтому включена программная отрисовка. " +
+		showError("Видеодрайвер не смог отрисовать окно, поэтому включена программная отрисовка. " +
 			"Закройте VPN routing (значок в трее → «Выход») и откройте снова.")
 		return
 	}

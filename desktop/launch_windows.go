@@ -108,8 +108,12 @@ func runServiceGUI(dir string, args []string, flags map[string]bool) {
 		_ = spawnDetached(mainExe(), nil)
 		os.Exit(0)
 	}
+	soft, setSoft, blank := guiRenderOptions()
 	var ui *gui.UI
 	ui = gui.New(gui.Options{
+		SoftGL:       soft,
+		SetSoftGL:    setSoft,
+		OnBlank:      blank,
 		Client:       c,
 		Tray:         true,
 		Hidden:       flags["hidden"] || flags["autostart"],
@@ -184,11 +188,15 @@ func runPortable(dir string, args []string, flags map[string]bool) {
 	b := startBackend(dir, flags)
 	// Здесь VPN в этом же процессе: при ошибке OpenGL окно не перезапускается, а просит перезапуска
 	prepareGUI(dir)
+	soft, setSoft, blank := guiRenderOptions()
 	ui := gui.New(gui.Options{
-		Client: api.Local(b.server.Handler()),
-		Tray:   true,
-		Hidden: flags["autostart"] || flags["hidden"],
-		OnQuit: b.quit,
+		SoftGL:    soft,
+		SetSoftGL: setSoft,
+		OnBlank:   blank,
+		Client:    api.Local(b.server.Handler()),
+		Tray:      true,
+		Hidden:    flags["autostart"] || flags["hidden"],
+		OnQuit:    b.quit,
 	})
 	b.server.Show = ui.Show
 	go func() {

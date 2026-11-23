@@ -27,8 +27,8 @@ android {
         // Ядро Xray (libv2ray.aar) собрано под Android 7.0+
         minSdk 24
         targetSdk 32
-        versionCode 10
-        versionName "2.1"
+        versionCode 11
+        versionName "2.2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 

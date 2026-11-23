@@ -118,6 +118,7 @@ func newSettingsTab(u *UI) *settingsTab {
 		card(t.autostart, t.autoHint, widget.NewSeparator(), t.connect, wrapped("Аналог «Постоянной VPN» на Android")),
 		sectionHead("СЕТЬ", ""),
 		card(t.dnsLeakRow, t.ipv6, wrapped("Иначе IPv6-трафик идёт мимо VPN. Если в системе IPv6 выключен, настройка не действует.")),
+		renderCard(u),
 		sectionHead("ОБНОВЛЕНИЯ", ""),
 		card(container.NewBorder(nil, nil, iconBox("vpn", themePal().accent, true), container.NewHBox(t.updInstall, t.updCheck),
 			container.New(&tightVBox{}, t.updTitle, t.updDetail)), t.updProgress),
@@ -134,6 +135,23 @@ func newSettingsTab(u *UI) *settingsTab {
 	)
 	t.root = container.NewVScroll(container.NewPadded(body))
 	return t
+}
+
+// renderCard — отрисовка окна (Windows): видеокартой или программно (Mesa), если окно белое или мерцает.
+func renderCard(u *UI) fyne.CanvasObject {
+	if u.o.SetSoftGL == nil {
+		return container.NewVBox()
+	}
+	soft := widget.NewCheck("Программная отрисовка окна", nil)
+	soft.SetChecked(u.o.SoftGL)
+	soft.OnChanged = func(on bool) {
+		if on != u.o.SoftGL {
+			u.setSoftGL(on)
+		}
+	}
+	return container.NewVBox(sectionHead("ОКНО", ""),
+		card(soft, wrapped("Окно рисуется процессором, а не видеокартой. Включите, если окно белое, мерцает или "+
+			"рисуется с артефактами. На работу VPN не влияет. Окно перезапустится.")))
 }
 
 func (t *settingsTab) update(st *api.State, force bool) {

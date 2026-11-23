@@ -35,6 +35,11 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Долгое нажатие на плитку «VPN» в быстрых настройках открывает само приложение,
+                 а не системную страницу «О приложении» -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
             <!-- Ярлыки «Включить» / «Выключить» при долгом нажатии на иконку -->
             <meta-data
                 android:name="android.app.shortcuts"
