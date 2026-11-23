@@ -1,23 +1,23 @@
 {
-  "versionCode": 11,
-  "versionName": "2.2",
-  "notes": "Белое окно на некоторых видеокартах (AMD): окно само переходит на программную отрисовку; переключатель в трее и в «Настройках» → «Окно»",
+  "versionCode": 12,
+  "versionName": "2.3",
+  "notes": "Защищённые подписки vpnrouting://crypt1/ из бота выдачи (привязка к устройству); автопереход на новый ключ сервера после плановой смены ключей",
   "date": "2026-11-23",
   "files": {
     "linux-amd64": {
       "file": "VPN_routing-linux-amd64.tar.gz",
-      "size": 23468181,
-      "sha256": "018f395bed95ae533327bf124d1fed9934ab9ec7ecc30756d8cff4aa61fe182d"
+      "size": 23504281,
+      "sha256": "fd74860a8054e862ab4cf12520802e34a01cec2ea0919a73a8f146c4030d3b8f"
     },
     "windows-amd64": {
       "file": "VPN_routing-windows.zip",
-      "size": 48301989,
-      "sha256": "cf198aa84cd4cf6376c17168e3b2b1722a1da15434348b24ee11b7578afc6f19"
+      "size": 48342922,
+      "sha256": "323d5547a4213fadfe44bed7cc72f06ae41e20a03f173eb094dac2e630e3f0ea"
     },
     "windows-setup": {
       "file": "VPN_routing-setup.exe",
-      "size": 49151488,
-      "sha256": "45ee5df94bbd4d79b0c033de83b93e831543ded158c12a0e2b92daa10c693fb7"
+      "size": 49163264,
+      "sha256": "3bf45e8c932126a3f0a84a860e6df899ec626550146ba90b395187f7f508df8f"
     }
   }
 }
