@@ -56,10 +56,16 @@ type Subscription struct {
 	Unsupported int    `json:"unsupported"`
 }
 
+// Locked — зашифрованная подписка (vpnrouting://crypt1/): адрес и серверы пользователю не показываются.
+func (s *Subscription) Locked() bool { return core.IsCryptLink(s.URL) }
+
 // Title — название подписки или её хост.
 func (s *Subscription) Title() string {
 	if s.Name != "" {
 		return s.Name
+	}
+	if s.Locked() {
+		return "Защищённая подписка"
 	}
 	u := s.URL
 	if i := strings.Index(u, "://"); i >= 0 {
@@ -119,6 +125,8 @@ type storeData struct {
 	// Обновления: время последней проверки (мс Unix) и версия, отложенная кнопкой «Позже»
 	UpdateLastCheck int64 `json:"updateLastCheck,omitempty"`
 	UpdateSkipped   int   `json:"updateSkipped,omitempty"`
+	// DeviceID — запасной идентификатор устройства, если система своего не даёт (deviceid.go)
+	DeviceID string `json:"deviceId,omitempty"`
 }
 
 // Store — настройки приложения. Все методы потокобезопасны.

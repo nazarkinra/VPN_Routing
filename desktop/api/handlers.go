@@ -91,6 +91,13 @@ func (s *Server) serverLink(r *http.Request) (any, error) {
 	if srv == nil {
 		return nil, errors.New("сервер не найден")
 	}
+	// API слушает локально, но доступен не только окну: ссылку сервера зашифрованной подписки
+	// не отдаём никому, иначе шифрование обходилось бы одним запросом
+	if srv.Sub != "" {
+		if sub, ok := s.Store.Subscription(srv.Sub); ok && sub.Locked() {
+			return nil, errors.New("сервер защищённой подписки: ссылка не показывается")
+		}
+	}
 	return map[string]string{"url": srv.URL}, nil
 }
 
@@ -143,6 +150,9 @@ func (s *Server) subLink(r *http.Request) (any, error) {
 	sub, ok := s.Store.Subscription(req.ID)
 	if !ok {
 		return nil, errors.New("подписка не найдена")
+	}
+	if sub.Locked() {
+		return nil, errors.New("адрес защищённой подписки не показывается")
 	}
 	return map[string]string{"url": sub.URL}, nil
 }

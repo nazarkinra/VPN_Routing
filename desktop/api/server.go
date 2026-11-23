@@ -194,9 +194,13 @@ func (s *Server) state(_ *http.Request) (any, error) {
 	active := s.Store.ActiveURL()
 	var current *ServerView
 	views := map[string][]ServerView{}
+	locked := map[string]bool{}
+	for _, sub := range s.Store.Subscriptions() {
+		locked[sub.ID] = sub.Locked()
+	}
 	for _, srv := range s.Store.Servers() {
 		v := ServerView{ID: srv.ID, Title: srv.Link().Title(), Subtitle: srv.Link().Subtitle(),
-			Pinging: s.Servers.IsPinging(srv.ID), Active: srv.URL == active, Sub: srv.Sub}
+			Pinging: s.Servers.IsPinging(srv.ID), Active: srv.URL == active, Sub: srv.Sub, Locked: locked[srv.Sub]}
 		if ms, ok := s.Store.Ping(srv.ID); ok {
 			v.Ping = &ms
 		}
@@ -215,7 +219,7 @@ func (s *Server) state(_ *http.Request) (any, error) {
 	for _, sub := range s.Store.Subscriptions() {
 		sv := &SubView{ID: sub.ID, Title: sub.Title(), UpdatedAt: sub.UpdatedAt, Upload: sub.Upload,
 			Download: sub.Download, Total: sub.Total, Expire: sub.Expire, Announce: sub.Announce, Error: sub.Error,
-			Unsupported: sub.Unsupported, Refreshing: s.Servers.IsRefreshing(sub.ID), Stale: sub.IsStale()}
+			Unsupported: sub.Unsupported, Refreshing: s.Servers.IsRefreshing(sub.ID), Stale: sub.IsStale(), Locked: sub.Locked()}
 		groups = append(groups, Group{Sub: sv, Servers: views[sub.ID]})
 	}
 	return &State{

@@ -8,6 +8,14 @@ def keystoreFile = rootProject.file('keystore.properties')
 def keystore = new Properties()
 if (keystoreFile.exists()) keystoreFile.withInputStream { keystore.load(it) }
 
+// Закрытый ключ зашифрованных ссылок vpnrouting://crypt1/ (LinkCrypt.java): файл link-key.b64 в корне
+// репозитория (в .gitignore) или переменная VPNROUTING_LINK_KEY — PKCS#8 DER в base64, одной строкой.
+// Без ключа приложение собирается, но зашифрованные ссылки не принимает.
+def linkKeyFile = rootProject.file('../link-key.b64')
+def linkKey = (System.getenv('VPNROUTING_LINK_KEY') ?: (linkKeyFile.exists() ? linkKeyFile.text : '')).replaceAll('\\s', '')
+if (!(linkKey ==~ /[A-Za-z0-9+\/=]*/)) throw new GradleException('link-key.b64: ожидается base64 одной строкой')
+if (linkKey.isEmpty()) logger.warn('VPN_routing: нет link-key.b64 — сборка без поддержки зашифрованных ссылок')
+
 android {
     compileSdk 32
 
@@ -41,6 +49,8 @@ android {
         // APK лежит в Git LFS: ссылка github.com/…/raw/… перенаправляет на сам файл, а не на указатель LFS
         buildConfigField 'String', 'UPDATE_APK_BASE', '"' + (updateBase
                 ?: 'https://github.com/nazarkinra/VPN_Routing/raw/main/') + '"'
+
+        buildConfigField 'String', 'LINK_PRIVATE_KEY', '"' + linkKey + '"'
 
         ndk {
             // Ядро весит ~35 МБ на архитектуру, поэтому в выпуск идут только нужные телефонам

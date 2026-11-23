@@ -278,7 +278,8 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
     public void onServerMore(ServerStore.Server server, View anchor) {
         PopupMenu menu = new PopupMenu(requireContext(), anchor);
         menu.getMenu().add(0, 1, 0, "Проверить пинг");
-        menu.getMenu().add(0, 2, 1, "Копировать ссылку");
+        // Серверы зашифрованной подписки не показываются и не копируются: ради этого она и шифруется
+        if (!store.isLocked(server)) menu.getMenu().add(0, 2, 1, "Копировать ссылку");
         if (server.subscriptionId == null) menu.getMenu().add(0, 3, 2, R.string.remove);
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -313,7 +314,7 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
     public void onGroupMore(ServerStore.Subscription sub, View anchor) {
         PopupMenu menu = new PopupMenu(requireContext(), anchor);
         menu.getMenu().add(0, 1, 0, "Переименовать");
-        menu.getMenu().add(0, 2, 1, "Копировать адрес подписки");
+        if (!sub.isLocked()) menu.getMenu().add(0, 2, 1, "Копировать адрес подписки");
         menu.getMenu().add(0, 3, 2, "Удалить подписку");
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -370,12 +371,14 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
     }
 
     private void refresh(ServerStore.Subscription sub, boolean quiet) {
+        if (getContext() == null) return;
+        String hwid = DeviceId.get(getContext());
         adapter.setRefreshing(sub.id, true);
         io.execute(() -> {
             String error = null;
             int count = 0;
             try {
-                SubscriptionFetcher.Result r = SubscriptionFetcher.fetch(sub.url);
+                SubscriptionFetcher.Result r = SubscriptionFetcher.fetchStored(sub.url, hwid);
                 store.applySubscription(sub.id, r);
                 count = r.links.size();
             } catch (Exception e) {
@@ -422,7 +425,16 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
         for (String raw : input.split("[\\r\\n\\s]+")) {
             String line = raw.trim();
             if (line.isEmpty()) continue;
-            if (SubscriptionFetcher.isSubscriptionUrl(line)) {
+            if (LinkCrypt.isCryptLink(line)) {
+                // Хранится в зашифрованном виде; расшифровка здесь — только проверка, что ссылка цела
+                // и подходит к этой сборке, иначе подписка висела бы в списке с вечной ошибкой
+                try {
+                    LinkCrypt.decrypt(line);
+                    newSubs.add(store.addSubscription(line));
+                } catch (java.io.IOException e) {
+                    errors.add("Зашифрованная ссылка: " + e.getMessage());
+                }
+            } else if (SubscriptionFetcher.isSubscriptionUrl(line)) {
                 newSubs.add(store.addSubscription(line));
             } else if (ProxyLink.isSupportedScheme(line)) {
                 try {
