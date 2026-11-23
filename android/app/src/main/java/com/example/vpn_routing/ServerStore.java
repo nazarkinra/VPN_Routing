@@ -69,8 +69,14 @@ public final class ServerStore {
             this.url = url;
         }
 
+        /** Зашифрованная подписка (LinkCrypt): адрес и серверы пользователю не показываются. */
+        public boolean isLocked() {
+            return LinkCrypt.isCryptLink(url);
+        }
+
         public String title() {
             if (!name.isEmpty()) return name;
+            if (isLocked()) return "Защищённая подписка";
             try {
                 String host = android.net.Uri.parse(url).getHost();
                 return host == null ? url : host;
@@ -148,6 +154,13 @@ public final class ServerStore {
     public synchronized Server find(String id) {
         for (Server s : servers) if (s.id.equals(id)) return s;
         return null;
+    }
+
+    /** Сервер из зашифрованной подписки. */
+    public synchronized boolean isLocked(Server server) {
+        if (server.subscriptionId == null) return false;
+        Subscription sub = subscription(server.subscriptionId);
+        return sub != null && sub.isLocked();
     }
 
     public synchronized Subscription subscription(String id) {

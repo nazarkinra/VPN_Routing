@@ -186,9 +186,11 @@ func (t *vpnTab) serverRow(s api.ServerView) fyne.CanvasObject {
 	more = iconButton(theme.MoreVerticalIcon(), "Ещё", func() {
 		items := []*fyne.MenuItem{
 			fyne.NewMenuItem("Проверить пинг", func() { t.u.act("/api/servers/ping", map[string]string{"id": s.ID}, "", nil) }),
-			fyne.NewMenuItem("Копировать ссылку", func() {
+		}
+		if !s.Locked {
+			items = append(items, fyne.NewMenuItem("Копировать ссылку", func() {
 				t.u.act("/api/servers/link", map[string]string{"id": s.ID}, "", func(r *api.Result) { t.u.copyText(r.URL, "Скопировано") })
-			}),
+			}))
 		}
 		if s.Sub == "" {
 			items = append(items, fyne.NewMenuItemSeparator(), fyne.NewMenuItem("Удалить", func() {
@@ -242,7 +244,7 @@ func (t *vpnTab) subCard(g api.Group) fyne.CanvasObject {
 	}
 	var more *widget.Button
 	more = iconButton(theme.MoreVerticalIcon(), "Ещё", func() {
-		showMenu(t.u.win, more,
+		items := []*fyne.MenuItem{
 			fyne.NewMenuItem("Переименовать", func() {
 				e := widget.NewEntry()
 				e.SetText(sub.Title)
@@ -253,15 +255,19 @@ func (t *vpnTab) subCard(g api.Group) fyne.CanvasObject {
 						}
 					}, t.u.win)
 			}),
-			fyne.NewMenuItem("Копировать адрес подписки", func() {
+		}
+		if !sub.Locked {
+			items = append(items, fyne.NewMenuItem("Копировать адрес подписки", func() {
 				t.u.act("/api/subs/link", map[string]string{"id": sub.ID}, "", func(r *api.Result) { t.u.copyText(r.URL, "Скопировано") })
-			}),
-			fyne.NewMenuItemSeparator(),
+			}))
+		}
+		items = append(items, fyne.NewMenuItemSeparator(),
 			fyne.NewMenuItem("Удалить подписку", func() {
 				t.u.confirm("Удалить подписку", "Удалить подписку «"+sub.Title+"» и все её серверы?", "Удалить", func() {
 					t.u.act("/api/subs/remove", map[string]string{"id": sub.ID}, "", nil)
 				})
 			}))
+		showMenu(t.u.win, more, items...)
 	})
 	headText := rowText(sub.Title, strings.Join(info, " · "))
 	parts := []fyne.CanvasObject{container.NewBorder(nil, nil, iconBox("globe", themePal().accent, true),

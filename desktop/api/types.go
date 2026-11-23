@@ -13,6 +13,8 @@ type ServerView struct {
 	Pinging bool   `json:"pinging"`
 	Active  bool   `json:"active"`
 	Sub     string `json:"sub"`
+	// Locked — сервер зашифрованной подписки: ссылку не показываем и не копируем
+	Locked bool `json:"locked,omitempty"`
 }
 
 type SubView struct {
@@ -28,6 +30,8 @@ type SubView struct {
 	Unsupported int    `json:"unsupported"`
 	Refreshing  bool   `json:"refreshing"`
 	Stale       bool   `json:"stale"`
+	// Locked — зашифрованная подписка (vpnrouting://crypt1/)
+	Locked bool `json:"locked,omitempty"`
 }
 
 // Group — «Мои серверы» (Sub == nil) или подписка со своими серверами.

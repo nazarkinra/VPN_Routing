@@ -43,16 +43,36 @@ public final class SubscriptionFetcher {
         return t.startsWith("https://") || t.startsWith("http://");
     }
 
+    /**
+     * Загружает подписку по сохранённому адресу: обычному или зашифрованному (LinkCrypt). Для
+     * зашифрованного адрес расшифровывается только на время запроса и уходит с X-Hwid.
+     * Вызывать не в UI-потоке.
+     */
+    public static Result fetchStored(String stored, String hwid) throws IOException {
+        if (LinkCrypt.isCryptLink(stored)) return fetch(LinkCrypt.decrypt(stored), hwid);
+        return fetch(stored, null);
+    }
+
     /** Загружает подписку. Вызывать не в UI-потоке. */
     public static Result fetch(String url) throws IOException {
+        return fetch(url, null);
+    }
+
+    /** hwid — заголовок X-Hwid, только для своих зашифрованных подписок (чужим панелям его не шлём). */
+    static Result fetch(String url, String hwid) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url.trim()).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(20000);
         c.setInstanceFollowRedirects(true);
         c.setRequestProperty("User-Agent", USER_AGENT);
         c.setRequestProperty("Accept", "*/*");
+        if (hwid != null) c.setRequestProperty("X-Hwid", hwid);
         try {
             int code = c.getResponseCode();
+            if (code == 404 && hwid != null) {
+                // Сервер нарочно не различает «отозвана» и «чужое устройство»
+                throw new IOException("доступ отозван или ссылка привязана к другому устройству — обратитесь к администратору");
+            }
             if (code == 404) throw new IOException("сервер не нашёл подписку (404): проверьте адрес");
             if (code / 100 != 2) throw new IOException("сервер ответил " + code);
             String body;

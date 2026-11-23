@@ -42,6 +42,24 @@ func IsSubscriptionURL(text string) bool {
 
 // FetchSubscription загружает подписку через client.
 func FetchSubscription(ctx context.Context, client *http.Client, url string) (*SubscriptionResult, error) {
+	return fetchSubscription(ctx, client, url, "")
+}
+
+// FetchStoredSubscription загружает подписку по сохранённому адресу: обычному или зашифрованному
+// (vpnrouting://crypt1/). Зашифрованный расшифровывается только на время запроса и уходит с X-Hwid;
+// чужим панелям идентификатор устройства не отправляется.
+func FetchStoredSubscription(ctx context.Context, client *http.Client, stored, hwid string) (*SubscriptionResult, error) {
+	if !IsCryptLink(stored) {
+		return fetchSubscription(ctx, client, stored, "")
+	}
+	url, err := DecryptLink(stored)
+	if err != nil {
+		return nil, err
+	}
+	return fetchSubscription(ctx, client, url, hwid)
+}
+
+func fetchSubscription(ctx context.Context, client *http.Client, url, hwid string) (*SubscriptionResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(url), nil)
@@ -50,11 +68,18 @@ func FetchSubscription(ctx context.Context, client *http.Client, url string) (*S
 	}
 	req.Header.Set("User-Agent", SubscriptionUserAgent)
 	req.Header.Set("Accept", "*/*")
+	if hwid != "" {
+		req.Header.Set("X-Hwid", hwid)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 404 && hwid != "" {
+		// Сервер нарочно не различает «отозвана» и «чужое устройство»
+		return nil, errors.New("доступ отозван или ссылка привязана к другому устройству — обратитесь к администратору")
+	}
 	if resp.StatusCode == 404 {
 		return nil, errors.New("сервер не нашёл подписку (404): проверьте адрес")
 	}

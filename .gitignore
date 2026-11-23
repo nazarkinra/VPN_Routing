@@ -13,3 +13,6 @@ desktop.ini
 *.auth
 *.env
 vless.txt
+
+# Закрытый ключ зашифрованных ссылок (vpnrouting://crypt1/): встраивается при сборке, в репозиторий — никогда
+link-key.b64

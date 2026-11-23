@@ -112,7 +112,11 @@ func (s *Servers) Refresh(id string) (int, error) {
 	if netenv.Current() == nil {
 		_, _ = netenv.Refresh()
 	}
-	r, err := core.FetchSubscription(context.Background(), netenv.HTTPClient(), sub.URL)
+	hwid := ""
+	if sub.Locked() {
+		hwid = s.store.DeviceID()
+	}
+	r, err := core.FetchStoredSubscription(context.Background(), netenv.HTTPClient(), sub.URL, hwid)
 	if err != nil {
 		s.store.SetSubscriptionError(id, err.Error())
 		logf("subscription %s: %v", sub.Title(), err)
@@ -148,6 +152,16 @@ func (s *Servers) AddInput(input string) AddResult {
 	var subs []string
 	for _, line := range strings.Fields(input) {
 		switch {
+		case core.IsCryptLink(line):
+			// Хранится зашифрованной; расшифровка здесь — только проверка, что ссылка цела и подходит
+			// к этой сборке, иначе подписка висела бы в списке с вечной ошибкой
+			if _, err := core.DecryptLink(line); err != nil {
+				r.Errors = append(r.Errors, "Зашифрованная ссылка: "+err.Error())
+				continue
+			}
+			sub := s.store.AddSubscription(line)
+			subs = append(subs, sub.ID)
+			r.Subscriptions = append(r.Subscriptions, sub.Title())
 		case core.IsSubscriptionURL(line):
 			sub := s.store.AddSubscription(line)
 			subs = append(subs, sub.ID)
