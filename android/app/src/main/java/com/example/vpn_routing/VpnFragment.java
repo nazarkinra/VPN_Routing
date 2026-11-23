@@ -390,6 +390,7 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
             ticker.post(() -> {
                 if (!isAdded()) return;
                 adapter.setRefreshing(sub.id, false);
+                followKeyRotation();
                 selectFirstIfNone();
                 reload();
                 if (err != null && !quiet) toast("Подписка не обновилась: " + err);
@@ -461,6 +462,16 @@ public class VpnFragment extends Fragment implements RoutingVpnService.Listener,
         } else if (newSubs.isEmpty()) {
             toast("Ссылок не найдено.");
         }
+    }
+
+    /** Сервер сменил ключ (плановая смена на сервере): перейти на тот же сервер с новым ключом. */
+    private void followKeyRotation() {
+        String active = settings.getVlessUrl();
+        if (active == null || active.isEmpty() || store.findByUrl(active) != null) return;
+        String next = KeyRotation.replacementFor(active, store.servers());
+        if (next == null) return;
+        if (isVpnActive()) RoutingVpnService.applyKey(requireContext(), next);
+        else settings.setVlessUrl(next);
     }
 
     /** Если сервер ещё не выбран, выбрать первый из списка. */

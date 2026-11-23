@@ -278,7 +278,30 @@ public class RoutingVpnService extends VpnService {
         connectivity = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         uidFinder = new UidFinder(connectivity);
         createChannel();
+        mainHandler.postDelayed(keyRotationCheck, KeyRotation.CHECK_EVERY_MS);
     }
+
+    /**
+     * Пока VPN включён, подписки обновляются и без открытия приложения: сервер планово меняет ключи,
+     * и старый работает лишь ограниченное время. Ключ выбранного сервера сменился — переход сразу.
+     */
+    private final Runnable keyRotationCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (destroyed) return;
+            if (mainOn) {
+                try {
+                    resolvers.execute(() -> {
+                        String next = KeyRotation.refreshStale(RoutingVpnService.this);
+                        if (next != null && !destroyed) RoutingVpnService.this.run(() -> applyKeyInternal(next));
+                    });
+                } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                    return; // служба останавливается
+                }
+            }
+            mainHandler.postDelayed(this, KeyRotation.CHECK_EVERY_MS);
+        }
+    };
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -382,6 +405,7 @@ public class RoutingVpnService extends VpnService {
     @Override
     public void onDestroy() {
         destroyed = true;
+        mainHandler.removeCallbacks(keyRotationCheck);
         run(() -> stopEverything(false));
         worker.shutdown();
         resolvers.shutdown();
